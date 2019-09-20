@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -50,7 +50,7 @@ namespace NLog.Config
         where TAttributeType : NameBaseAttribute
     {
         private readonly Dictionary<string, GetTypeDelegate> _items = new Dictionary<string, GetTypeDelegate>(StringComparer.OrdinalIgnoreCase);
-        private ConfigurationItemFactory _parentFactory;
+        private readonly ConfigurationItemFactory _parentFactory;
 
         internal Factory(ConfigurationItemFactory parentFactory)
         {
@@ -123,11 +123,11 @@ namespace NLog.Config
         /// <summary>
         /// Registers a single type definition.
         /// </summary>
-        /// <param name="name">The item name.</param>
-        /// <param name="type">The type of the item.</param>
-        public void RegisterDefinition(string name, Type type)
+        /// <param name="itemName">The item name.</param>
+        /// <param name="itemDefinition">The type of the item.</param>
+        public void RegisterDefinition(string itemName, Type itemDefinition)
         {
-            _items[name] = () => type;
+            _items[itemName] = () => itemDefinition;
         }
 
         /// <summary>
@@ -187,24 +187,22 @@ namespace NLog.Config
         /// <summary>
         /// Creates an item instance.
         /// </summary>
-        /// <param name="name">The name of the item.</param>
+        /// <param name="itemName">The name of the item.</param>
         /// <returns>Created item.</returns>
-        public virtual TBaseType CreateInstance(string name)
+        public virtual TBaseType CreateInstance(string itemName)
         {
-            TBaseType result;
-
-            if (TryCreateInstance(name, out result))
+            if (TryCreateInstance(itemName, out TBaseType result))
             {
                 return result;
             }
-            var message = typeof(TBaseType).Name + " cannot be found: '" + name + "'";
-            if (name != null && (name.StartsWith("aspnet", StringComparison.OrdinalIgnoreCase) ||
-                                 name.StartsWith("iis", StringComparison.OrdinalIgnoreCase)))
+
+            var message = typeof(TBaseType).Name + " cannot be found: '" + itemName + "'";
+            if (itemName != null && (itemName.StartsWith("aspnet", StringComparison.OrdinalIgnoreCase) ||
+                                 itemName.StartsWith("iis", StringComparison.OrdinalIgnoreCase)))
             {
                 //common mistake and probably missing NLog.Web
                 message += ". Is NLog.Web not included?";
             }
-
 
             throw new ArgumentException(message);
         }
@@ -251,7 +249,7 @@ namespace NLog.Config
         /// <returns>True if instance was created successfully, false otherwise.</returns>
         public override bool TryCreateInstance(string itemName, out LayoutRenderer result)
         {
-            //first try func renderers, as they should have the possiblity to overwrite a current one.
+            //first try func renderers, as they should have the possibility to overwrite a current one.
             if (_funcRenderers != null)
             {
                 FuncLayoutRenderer funcResult;

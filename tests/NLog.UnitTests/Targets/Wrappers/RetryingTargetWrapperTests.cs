@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -110,13 +110,13 @@ namespace NLog.UnitTests.Targets.Wrappers
             };
 
             var result = RunAndCaptureInternalLog(() => wrapper.WriteAsyncLogEvents(events), LogLevel.Trace);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 1/4") != -1);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 2/4") != -1);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 3/4") != -1);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 4/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 1/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 2/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 3/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 4/4") != -1);
             Assert.True(result.IndexOf("Warn Too many retries. Aborting.") != -1);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 1/4") != -1);
-            Assert.True(result.IndexOf("Warn Error while writing to 'MyTarget': System.InvalidOperationException: Some exception has occurred.. Try 2/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 1/4") != -1);
+            Assert.True(result.IndexOf("Error while writing to 'MyTarget'. Try 2/4") != -1);
 
             // first event does not get to wrapped target because of too many attempts.
             // second event gets there in 3rd retry
@@ -140,45 +140,48 @@ namespace NLog.UnitTests.Targets.Wrappers
 #endif
         public void RetryingTargetWrapperBlockingCloseTest()
         {
-            var target = new MyTarget()
+            RetryingIntegrationTest(3, () =>
             {
-                ThrowExceptions = 5,
-            };
-            var wrapper = new RetryingTargetWrapper()
-            {
-                WrappedTarget = target,
-                RetryCount = 10,
-                RetryDelayMilliseconds = 5000,
-            };
-            var asyncWrapper = new AsyncTargetWrapper(wrapper) { TimeToSleepBetweenBatches = 1 };
+                var target = new MyTarget()
+                {
+                    ThrowExceptions = 5,
+                };
+                var wrapper = new RetryingTargetWrapper()
+                {
+                    WrappedTarget = target,
+                    RetryCount = 10,
+                    RetryDelayMilliseconds = 5000,
+                };
+                var asyncWrapper = new AsyncTargetWrapper(wrapper) {TimeToSleepBetweenBatches = 1};
 
-            asyncWrapper.Initialize(null);
-            wrapper.Initialize(null);
-            target.Initialize(null);
+                asyncWrapper.Initialize(null);
+                wrapper.Initialize(null);
+                target.Initialize(null);
 
-            var exceptions = new List<Exception>();
+                var exceptions = new List<Exception>();
 
-            var events = new[]
-            {
-                new LogEventInfo(LogLevel.Debug, "Logger1", "Hello").WithContinuation(exceptions.Add),
-                new LogEventInfo(LogLevel.Info, "Logger1", "Hello").WithContinuation(exceptions.Add),
-                new LogEventInfo(LogLevel.Info, "Logger2", "Hello").WithContinuation(exceptions.Add),
-            };
+                var events = new[]
+                {
+                    new LogEventInfo(LogLevel.Debug, "Logger1", "Hello").WithContinuation(exceptions.Add),
+                    new LogEventInfo(LogLevel.Info, "Logger1", "Hello").WithContinuation(exceptions.Add),
+                    new LogEventInfo(LogLevel.Info, "Logger2", "Hello").WithContinuation(exceptions.Add),
+                };
 
-            // Attempt to write LogEvents that will take forever to retry
-            asyncWrapper.WriteAsyncLogEvents(events);
-            // Wait a little for the AsyncWrapper to start writing
-            System.Threading.Thread.Sleep(50);
-            // Close down the AsyncWrapper while busy writing
-            asyncWrapper.Close();
-            // Close down the RetryingWrapper while busy retrying
-            wrapper.Close();
-            // Close down the actual target while busy writing
-            target.Close();
-            // Wait a little for the RetryingWrapper to detect that it has been closed down
-            System.Threading.Thread.Sleep(200);
-            // The premature abort, causes the exception to be logged
-            Assert.NotNull(exceptions[0]);
+                // Attempt to write LogEvents that will take forever to retry
+                asyncWrapper.WriteAsyncLogEvents(events);
+                // Wait a little for the AsyncWrapper to start writing
+                System.Threading.Thread.Sleep(50);
+                // Close down the AsyncWrapper while busy writing
+                asyncWrapper.Close();
+                // Close down the RetryingWrapper while busy retrying
+                wrapper.Close();
+                // Close down the actual target while busy writing
+                target.Close();
+                // Wait a little for the RetryingWrapper to detect that it has been closed down
+                System.Threading.Thread.Sleep(200);
+                // The premature abort, causes the exception to be logged
+                Assert.NotNull(exceptions[0]);
+            });
         }
 
         public class MyTarget : Target
@@ -201,7 +204,7 @@ namespace NLog.UnitTests.Targets.Wrappers
             {
                 if (ThrowExceptions-- > 0)
                 {
-                    logEvent.Continuation(new InvalidOperationException("Some exception has occurred."));
+                    logEvent.Continuation(new ApplicationException("Some exception has occurred."));
                     return;
                 }
 

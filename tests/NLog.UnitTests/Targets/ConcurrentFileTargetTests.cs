@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -32,7 +32,6 @@
 // 
 
 #if !NETSTANDARD
-
 #define DISABLE_FILE_INTERNAL_LOGGING
 
 namespace NLog.UnitTests.Targets
@@ -45,6 +44,9 @@ namespace NLog.UnitTests.Targets
     using NLog.Targets;
     using NLog.Targets.Wrappers;
     using Xunit;
+    using System.Collections.Generic;
+    using System.Linq;
+
     using Xunit.Extensions;
 
     public class ConcurrentFileTargetTests : NLogTestBase
@@ -120,17 +122,17 @@ namespace NLog.UnitTests.Targets
             try
 #endif
             {
-
-
-                Thread.Sleep(Math.Max((10 - idxProcess), 1) * 5);  // Delay to wait for the other processes
-
-                for (int i = 0; i < numLogs; ++i)
+                using (new NoThrowNLogExceptions())
                 {
-                    logger.Debug(format, i);
+                    Thread.Sleep(Math.Max((10 - idxProcess), 1) * 5);  // Delay to wait for the other processes
+
+                    for (int i = 0; i < numLogs; ++i)
+                    {
+                        logger.Debug(format, i);
+                    }
+
+                    LogManager.Configuration = null;     // Flush + Close
                 }
-
-                LogManager.Configuration = null;     // Flush + Close
-
             }
 #if !DISABLE_FILE_INTERNAL_LOGGING
             catch (Exception ex)
@@ -152,7 +154,7 @@ namespace NLog.UnitTests.Targets
 
         private string MakeFileName(int numProcesses, int numLogs, string mode)
         {
-            // Having separate filenames for the various tests makes debugging easier.
+            // Having separate file names for the various tests makes debugging easier.
             return $"test_{numProcesses}_{numLogs}_{mode.Replace('|', '_')}.txt";
         }
 
@@ -168,7 +170,9 @@ namespace NLog.UnitTests.Targets
 
                 string logFile = Path.Combine(tempPath, MakeFileName(numProcesses, numLogs, mode));
                 if (File.Exists(logFile))
-                    File.Delete(logFile);
+                {
+                    throw new Exception($"file '{logFile}' already exists");
+                }
 
                 Process[] processes = new Process[numProcesses];
 
@@ -198,32 +202,33 @@ namespace NLog.UnitTests.Targets
 
                 bool verifyFileSize = files.Count > 1;
 
-                int[] maxNumber = new int[numProcesses];
+                var receivedNumbersSet = new List<int>[numProcesses];
+                for (int i = 0; i < numProcesses; i++)
+                {
+                    var receivedNumbers = new List<int>(numLogs);
+                    receivedNumbersSet[i] = receivedNumbers;
+                }
+
                 //Console.WriteLine("Verifying output file {0}", logFile);
                 foreach (var file in files)
                 {
+
                     using (StreamReader sr = File.OpenText(file))
                     {
-                        string line;
 
+                        string line;
                         while ((line = sr.ReadLine()) != null)
                         {
                             string[] tokens = line.Split(' ');
                             Assert.Equal(2, tokens.Length);
-                            try
-                            {
-                                int thread = Convert.ToInt32(tokens[0]);
-                                int number = Convert.ToInt32(tokens[1]);
-                                Assert.True(thread >= 0);
-                                Assert.True(thread < numProcesses);
-                                Assert.Equal(maxNumber[thread], number);
-                                maxNumber[thread]++;
-                            }
-                            catch (Exception ex)
-                            {
-                                throw new InvalidOperationException($"Error when parsing line '{line}' in file {file}", ex);
-                            }
+
+                            int thread = Convert.ToInt32(tokens[0]);
+                            int number = Convert.ToInt32(tokens[1]);
+                            Assert.True(thread >= 0);
+                            Assert.True(thread < numProcesses);
+                            receivedNumbersSet[thread].Add(number);
                         }
+
 
                         if (verifyFileSize)
                         {
@@ -236,6 +241,41 @@ namespace NLog.UnitTests.Targets
                         }
                     }
                 }
+
+                var expected = Enumerable.Range(0, numLogs).ToList();
+
+                int currentProcess = 0;
+                bool? equalsWhenReorderd = null;
+                try
+                {
+                    for (; currentProcess < numProcesses; currentProcess++)
+                    {
+                        var receivedNumbers = receivedNumbersSet[currentProcess];
+
+                        var equalLength = expected.Count == receivedNumbers.Count;
+
+                        var fastCheck = equalLength && expected.SequenceEqual(receivedNumbers);
+
+                        if (!fastCheck)
+                        //assert equals on two long lists in xUnit is lame. Not showing the difference.
+                        {
+                            if (equalLength)
+                            {
+                                var reodered = receivedNumbers.OrderBy(i => i);
+
+                                equalsWhenReorderd = expected.SequenceEqual(reodered);
+                            }
+
+                            Assert.Equal(string.Join(",", expected), string.Join(",", receivedNumbers));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    var reoderProblem = equalsWhenReorderd == null ? "Dunno" : (equalsWhenReorderd == true ? "Yes" : "No");
+                    throw new InvalidOperationException($"Error when comparing path {tempPath} for process {currentProcess}. Is this a recording problem? {reoderProblem}", ex);
+                }
+
             }
             finally
             {
@@ -253,29 +293,31 @@ namespace NLog.UnitTests.Targets
         }
 
         [Theory]
-#if !MONO
-        // MONO Doesn't work well with global mutex, and it is needed for succesful concurrent archive operations
-        [InlineData(2, 500, "none|archive")]
-        [InlineData(2, 500, "none|mutex|archive")]
-#endif
         [InlineData(2, 10000, "none")]
         [InlineData(5, 4000, "none")]
         [InlineData(10, 2000, "none")]
+#if !MONO
+        // MONO Doesn't work well with global mutex, and it is needed for successful concurrent archive operations
+        [InlineData(2, 500, "none|archive")]
+        [InlineData(2, 500, "none|mutex|archive")]
         [InlineData(2, 10000, "none|mutex")]
         [InlineData(5, 4000, "none|mutex")]
         [InlineData(10, 2000, "none|mutex")]
+#endif
         public void SimpleConcurrentTest(int numProcesses, int numLogs, string mode)
         {
-            DoConcurrentTest(numProcesses, numLogs, mode);
+            RetryingIntegrationTest(3, () => DoConcurrentTest(numProcesses, numLogs, mode));
         }
 
         [Theory]
         [InlineData("async")]
+#if !MONO
         [InlineData("async|mutex")]
+#endif
         public void AsyncConcurrentTest(string mode)
         {
             // Before 2 processes are running into concurrent writes, 
-            // the first process typically already has written couple thousend events.
+            // the first process typically already has written couple thousand events.
             // Thus to have a meaningful test, at least 10K events are required.
             // Due to the buffering it makes no big difference in runtime, whether we
             // have 2 process writing 10K events each or couple more processes with even more events.
@@ -285,7 +327,9 @@ namespace NLog.UnitTests.Targets
 
         [Theory]
         [InlineData("buffered")]
+#if !MONO
         [InlineData("buffered|mutex")]
+#endif
         public void BufferedConcurrentTest(string mode)
         {
             DoConcurrentTest(5, 1000, mode);
@@ -293,7 +337,9 @@ namespace NLog.UnitTests.Targets
 
         [Theory]
         [InlineData("buffered_timed_flush")]
+#if !MONO
         [InlineData("buffered_timed_flush|mutex")]
+#endif
         public void BufferedTimedFlushConcurrentTest(string mode)
         {
             DoConcurrentTest(5, 1000, mode);

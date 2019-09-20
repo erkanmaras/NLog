@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,12 +31,13 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !NETSTANDARD1_5
+#if !NETSTANDARD1_0
 
 namespace NLog.Internal.Fakeables
 {
     using System;
     using System.Collections.Generic;
+    using System.Reflection;
     using NLog.Common;
 
     /// <summary>
@@ -56,37 +57,70 @@ namespace NLog.Internal.Fakeables
         {
 #if !SILVERLIGHT
             _currentAppDomain = appDomain;
+#endif
             try
             {
-                BaseDirectory = appDomain.BaseDirectory;
+                BaseDirectory = LookupBaseDirectory(appDomain) ?? string.Empty;
             }
-            catch (System.Security.SecurityException ex)
+            catch (Exception ex)
             {
                 InternalLogger.Warn(ex, "AppDomain.BaseDirectory Failed");
                 BaseDirectory = string.Empty;
             }
-#if !NETSTANDARD
+
             try
             {
-                ConfigurationFile = appDomain.SetupInformation.ConfigurationFile;
+                ConfigurationFile = LookupConfigurationFile(appDomain);
             }
-            catch (System.Security.SecurityException ex)
+            catch (Exception ex)
             {
                 InternalLogger.Warn(ex, "AppDomain.SetupInformation.ConfigurationFile Failed");
                 ConfigurationFile = string.Empty;
             }
 
-            string privateBinPath = appDomain.SetupInformation.PrivateBinPath;
-            PrivateBinPath = string.IsNullOrEmpty(privateBinPath)
-                                 ? ArrayHelper.Empty<string>()
-                                 : appDomain.SetupInformation.PrivateBinPath.Split(new[] {';'},
-                                                                                   StringSplitOptions.RemoveEmptyEntries);
-#else
-            PrivateBinPath = ArrayHelper.Empty<string>();
-            ConfigurationFile = string.Empty;
-#endif
+            try
+            {
+                PrivateBinPath = LookupPrivateBinPath(appDomain);
+            }
+            catch (Exception ex)
+            {
+                InternalLogger.Warn(ex, "AppDomain.SetupInformation.PrivateBinPath Failed");
+                PrivateBinPath = ArrayHelper.Empty<string>();
+            }
+
+#if !SILVERLIGHT
             FriendlyName = appDomain.FriendlyName;
             Id = appDomain.Id;
+#endif
+        }
+
+        private static string LookupBaseDirectory(AppDomain appDomain)
+        {
+#if !SILVERLIGHT
+            return appDomain.BaseDirectory;
+#else
+            return string.Empty;
+#endif
+        }
+
+        private static string LookupConfigurationFile(AppDomain appDomain)
+        {
+#if !NETSTANDARD && !SILVERLIGHT
+            return appDomain.SetupInformation.ConfigurationFile;
+#else
+            return string.Empty;
+#endif
+        }
+
+        private static string[] LookupPrivateBinPath(AppDomain appDomain)
+        {
+#if !NETSTANDARD && !SILVERLIGHT
+            string privateBinPath = appDomain.SetupInformation.PrivateBinPath;
+            return string.IsNullOrEmpty(privateBinPath)
+                                    ? ArrayHelper.Empty<string>()
+                                    : privateBinPath.SplitAndTrimTokens(';');
+#else
+            return ArrayHelper.Empty<string>();
 #endif
         }
 
@@ -119,6 +153,20 @@ namespace NLog.Internal.Fakeables
         /// Gets an integer that uniquely identifies the application domain within the process. 
         /// </summary>
         public int Id { get; private set; }
+
+        /// <summary>
+        /// Gets the assemblies that have been loaded into the execution context of this application domain.
+        /// </summary>
+        /// <returns>A list of assemblies in this application domain.</returns>
+        public IEnumerable<Assembly> GetAssemblies()
+        {
+#if !SILVERLIGHT
+            if (_currentAppDomain != null)
+                return _currentAppDomain.GetAssemblies();
+            else
+#endif
+                return Internal.ArrayHelper.Empty<Assembly>();
+        }
 
         /// <summary>
         /// Process exit event.

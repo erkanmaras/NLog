@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,26 +37,25 @@ namespace NLog.LayoutRenderers
     using System.ComponentModel;
     using System.Globalization;
     using System.Text;
-
-    using Config;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The short date in a sortable format yyyy-MM-dd.
     /// </summary>
     [LayoutRenderer("shortdate")]
     [ThreadAgnostic]
-    public class ShortDateLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class ShortDateLayoutRenderer : LayoutRenderer, IRawValue, IStringValueRenderer
     {
-
-        private static readonly DateData CachedUtcDate = new DateData();
-        private static readonly DateData CachedLocalDate = new DateData();
-
         /// <summary>
         /// Gets or sets a value indicating whether to output UTC time instead of local time.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(false)]
         public bool UniversalTime { get; set; }
+
+        private CachedDateFormatted _cachedDateFormatted = new CachedDateFormatted(DateTime.MaxValue, string.Empty);
 
         /// <summary>
         /// Renders the current short date string (yyyy-MM-dd) and appends it to the specified <see cref="StringBuilder" />.
@@ -65,42 +64,52 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            var timestamp = logEvent.TimeStamp;
+            string formattedDate = GetStringValue(logEvent);
+            builder.Append(formattedDate);
+        }
 
+        private string GetStringValue(LogEventInfo logEvent)
+        {
+            DateTime timestamp = GetValue(logEvent);
+
+            var cachedDateFormatted = _cachedDateFormatted;
+            if (cachedDateFormatted.Date != timestamp.Date)
+            {
+                var formatTime = timestamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                _cachedDateFormatted = cachedDateFormatted = new CachedDateFormatted(timestamp.Date, formatTime);
+            }
+
+            return cachedDateFormatted.FormattedDate;
+        }
+
+        private DateTime GetValue(LogEventInfo logEvent)
+        {
+            var timestamp = logEvent.TimeStamp;
             if (UniversalTime)
             {
                 timestamp = timestamp.ToUniversalTime();
-                CachedUtcDate.AppendDate(builder, timestamp);
             }
-            else
-            {
-                CachedLocalDate.AppendDate(builder, timestamp);
-            }
+            return timestamp;
         }
 
-        private class DateData
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
         {
-            private DateTime _date;
-            private string _formattedDate;
+            value = GetValue(logEvent).Date;    // Only Date-part
+            return true;
+        }
 
-            /// <summary>
-            /// Appends a date in format yyyy-MM-dd to the StringBuilder.
-            /// The DateTime.ToString() result is cached for future uses
-            /// since it only changes once a day. This optimization yields a
-            /// performance boost of 40% and makes the renderer allocation-free
-            /// in must cases.
-            /// </summary>
-            /// <param name="builder">The <see cref="StringBuilder"/> to append the date to</param>
-            /// <param name="timestamp">The date to append</param>
-            public void AppendDate(StringBuilder builder, DateTime timestamp)
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => GetStringValue(logEvent);
+
+        private class CachedDateFormatted
+        {
+            public CachedDateFormatted(DateTime date, string formattedDate)
             {
-                if (_formattedDate == null || _date != timestamp.Date)
-                {
-                    _date = timestamp.Date;
-                    _formattedDate = timestamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                }
-                builder.Append(_formattedDate);
+                Date = date;
+                FormattedDate = formattedDate;
             }
+
+            public readonly DateTime Date;
+            public readonly string FormattedDate;
         }
     }
 }

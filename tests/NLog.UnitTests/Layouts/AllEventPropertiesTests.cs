@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,6 +33,7 @@
 
 using System;
 using System.Text;
+using NLog.Config;
 using NLog.LayoutRenderers;
 using NLog.Fluent;
 
@@ -47,7 +48,7 @@ namespace NLog.UnitTests.Layouts
         {
             var renderer = new AllEventPropertiesLayoutRenderer();
             var ev = BuildLogEventWithProperties();
-            
+
             var result = renderer.Render(ev);
 
             Assert.Equal("a=1, hello=world, 17=100", result);
@@ -110,7 +111,7 @@ namespace NLog.UnitTests.Layouts
         public void AllEventWithFluent_without_callerInformation()
         {
 
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
                 <nlog throwExceptions='true' >
                     <targets>
                         <target type='Debug'
@@ -140,8 +141,8 @@ namespace NLog.UnitTests.Layouts
                 .Write();
 
 
-            AssertDebugLastMessage("m","Test=InfoWrite, coolness=200%, a=not b");
-            
+            AssertDebugLastMessage("m", "Test=InfoWrite, coolness=200%, a=not b");
+
         }
 
 #if NET3_5 || NET4_0
@@ -151,7 +152,7 @@ namespace NLog.UnitTests.Layouts
 #endif
         public void AllEventWithFluent_with_callerInformation()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
                 <nlog throwExceptions='true' >
                     <targets>
                         <target type='Debug'
@@ -168,7 +169,7 @@ namespace NLog.UnitTests.Layouts
                 </nlog>");
 
             LogManager.Configuration = configuration;
-      
+
             var logger = LogManager.GetCurrentClassLogger();
             logger.Debug()
                 .Message("This is a test fluent message '{0}'.", DateTime.Now.Ticks)
@@ -180,6 +181,31 @@ namespace NLog.UnitTests.Layouts
             AssertDebugLastMessageContains("m", "CallerMemberName=");
             AssertDebugLastMessageContains("m", "CallerFilePath=");
             AssertDebugLastMessageContains("m", "CallerLineNumber=");
+        }
+
+        [Theory]
+        [InlineData(null, "a=1, hello=world, 17=100, notempty=0")]
+        [InlineData(false, "a=1, hello=world, 17=100, notempty=0")]
+        [InlineData(true, "a=1, hello=world, 17=100, empty1=, empty2=, notempty=0")]
+        public void IncludeEmptyValuesTest(bool? includeEmptyValues, string expected)
+        {
+            // Arrange
+            var renderer = new AllEventPropertiesLayoutRenderer();
+            if (includeEmptyValues != null)
+            {
+                renderer.IncludeEmptyValues = includeEmptyValues.Value;
+            }
+
+            var ev = BuildLogEventWithProperties();
+            ev.Properties["empty1"] = null;
+            ev.Properties["empty2"] = "";
+            ev.Properties["notempty"] = 0;
+
+            // Act
+            var result = renderer.Render(ev);
+
+            // Assert
+            Assert.Equal(expected, result);
         }
 
         private static LogEventInfo BuildLogEventWithProperties()

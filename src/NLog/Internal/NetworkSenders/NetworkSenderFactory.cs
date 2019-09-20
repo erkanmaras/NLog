@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,7 +37,6 @@ namespace NLog.Internal.NetworkSenders
     using System.IO;
     using System.Net;
     using System.Net.Sockets;
-    using Common;
 
     /// <summary>
     /// Default implementation of <see cref="INetworkSenderFactory"/>.
@@ -46,19 +45,13 @@ namespace NLog.Internal.NetworkSenders
     {
         public static readonly INetworkSenderFactory Default = new NetworkSenderFactory();
 
-        /// <summary>
-        /// Creates a new instance of the network sender based on a network URL:.
-        /// </summary>
-        /// <param name="url">
-        /// URL that determines the network sender to be created.
-        /// </param>
-        /// <param name="maxQueueSize">
-        /// The maximum queue size.
-        /// </param>
-        /// /// <returns>
-        /// A newly created network sender.
-        /// </returns>
+#if !SILVERLIGHT
+        /// <inheritdoc />
+        public NetworkSender Create(string url, int maxQueueSize, System.Security.Authentication.SslProtocols sslProtocols, TimeSpan keepAliveTime)
+#else
+        /// <inheritdoc />
         public NetworkSender Create(string url, int maxQueueSize)
+#endif
         {
             if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
             {
@@ -73,25 +66,37 @@ namespace NLog.Internal.NetworkSenders
             if (url.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase))
             {
                 return new TcpNetworkSender(url, AddressFamily.Unspecified)
-                           {
-                               MaxQueueSize = maxQueueSize
-                           };
+                {
+                    MaxQueueSize = maxQueueSize,
+#if !SILVERLIGHT
+                    SslProtocols = sslProtocols,
+                    KeepAliveTime = keepAliveTime,
+#endif
+                };
             }
 
             if (url.StartsWith("tcp4://", StringComparison.OrdinalIgnoreCase))
             {
                 return new TcpNetworkSender(url, AddressFamily.InterNetwork)
-                           {
-                               MaxQueueSize = maxQueueSize
-                           };
+                {
+                    MaxQueueSize = maxQueueSize,
+#if !SILVERLIGHT
+                    SslProtocols = sslProtocols,
+                    KeepAliveTime = keepAliveTime,
+#endif
+                };
             }
 
             if (url.StartsWith("tcp6://", StringComparison.OrdinalIgnoreCase))
             {
                 return new TcpNetworkSender(url, AddressFamily.InterNetworkV6)
-                           {
-                               MaxQueueSize = maxQueueSize
-                           };
+                {
+                    MaxQueueSize = maxQueueSize,
+#if !SILVERLIGHT
+                    SslProtocols = sslProtocols,
+                    KeepAliveTime = keepAliveTime,
+#endif
+                };
             }
 
 #if !SILVERLIGHT
@@ -111,7 +116,7 @@ namespace NLog.Internal.NetworkSenders
             }
 #endif
 
-            throw new ArgumentException("Unrecognized network address", "url");
+            throw new ArgumentException("Unrecognized network address", nameof(url));
         }
     }
 }

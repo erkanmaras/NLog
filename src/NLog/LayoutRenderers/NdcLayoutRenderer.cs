@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,11 +35,14 @@ namespace NLog.LayoutRenderers
 {
     using System;
     using System.Text;
+    using NLog.Config;
 
     /// <summary>
-    /// Nested Diagnostic Context item. Provided for compatibility with log4net.
+    /// Render a Nested Diagnostic Context item.
+    /// See <see cref="NestedDiagnosticsContext"/>
     /// </summary>
     [LayoutRenderer("ndc")]
+    [ThreadSafe]
     public class NdcLayoutRenderer : LayoutRenderer
     {
         /// <summary>
@@ -77,7 +80,18 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
+            if (TopFrames == 1)
+            {
+                // Allows fast rendering of topframes=1
+                var topFrame = NestedDiagnosticsContext.PeekObject();
+                if (topFrame != null)
+                    AppendAsString(topFrame, GetFormatProvider(logEvent), builder);
+                return;
+            }
+
             var messages = NestedDiagnosticsContext.GetAllObjects();
+            if (messages.Length == 0)
+                return;
 
             int startPos = 0;
             int endPos = messages.Length;
@@ -91,14 +105,20 @@ namespace NLog.LayoutRenderers
                 startPos = messages.Length - Math.Min(BottomFrames, messages.Length);
             }
 
+            var formatProvider = GetFormatProvider(logEvent);
             string currentSeparator = string.Empty;
             for (int i = endPos - 1; i >= startPos; --i)
             {
-                var stringValue = Internal.FormatHelper.ConvertToString(messages[i], logEvent.FormatProvider);
                 builder.Append(currentSeparator);
-                builder.Append(stringValue);
+                AppendAsString(messages[i], formatProvider, builder);
                 currentSeparator = Separator;
             }
+        }
+
+        private static void AppendAsString(object message, IFormatProvider formatProvider, StringBuilder builder)
+        {
+            string stringValue = Convert.ToString(message, formatProvider);
+            builder.Append(stringValue);
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,12 +33,12 @@
 
 namespace NLog.Targets.Wrappers
 {
-    using Common;
-    using Conditions;
-    using Internal;
+    using NLog.Common;
+    using NLog.Conditions;
+    using NLog.Internal;
 
     /// <summary>
-    /// Causes a flush on a wrapped target if LogEvent statisfies the <see cref="Condition"/>.
+    /// Causes a flush on a wrapped target if LogEvent satisfies the <see cref="Condition"/>.
     /// If condition isn't set, flushes on each write.
     /// </summary>
     /// <seealso href="https://github.com/nlog/nlog/wiki/AutoFlushWrapper-target">Documentation on NLog Wiki</seealso>
@@ -61,15 +61,24 @@ namespace NLog.Targets.Wrappers
         /// Gets or sets the condition expression. Log events who meet this condition will cause
         /// a flush on the wrapped target.
         /// </summary>
+        /// <docgen category='General Options' order='10' />
         public ConditionExpression Condition { get; set; }
 
         /// <summary>
         /// Delay the flush until the LogEvent has been confirmed as written
         /// </summary>
-        public bool AsyncFlush { get => _asyncFlush ?? true;
+        /// <docgen category='General Options' order='10' />
+        public bool AsyncFlush
+        {
+            get => _asyncFlush ?? true;
             set => _asyncFlush = value;
         }
         private bool? _asyncFlush;
+
+        /// <summary>
+        /// Only flush when LogEvent matches condition. Ignore explicit-flush, config-reload-flush and shutdown-flush
+        /// </summary>
+        public bool FlushOnConditionOnly { get; set; }
 
         private readonly AsyncOperationCounter _pendingManualFlushList = new AsyncOperationCounter();
 
@@ -135,7 +144,7 @@ namespace NLog.Targets.Wrappers
                     AsyncContinuation wrappedContinuation = (ex) =>
                     {
                         if (ex == null)
-                            WrappedTarget.Flush((e) => { });
+                            FlushOnCondition();
                         _pendingManualFlushList.CompleteOperation(ex);
                         currentContinuation(ex);
                     };
@@ -145,7 +154,7 @@ namespace NLog.Targets.Wrappers
                 else
                 {
                     WrappedTarget.WriteAsyncLogEvent(logEvent);
-                    FlushAsync((e) => { });
+                    FlushOnCondition();
                 }
             }
             else
@@ -159,6 +168,22 @@ namespace NLog.Targets.Wrappers
         /// </summary>
         /// <param name="asyncContinuation">The asynchronous continuation.</param>
         protected override void FlushAsync(AsyncContinuation asyncContinuation)
+        {
+            if (FlushOnConditionOnly)
+                asyncContinuation(null);
+            else
+                FlushWrappedTarget(asyncContinuation);
+        }
+
+        private void FlushOnCondition()
+        {
+            if (FlushOnConditionOnly)
+                FlushWrappedTarget((e) => { });
+            else
+                FlushAsync((e) => { });
+        }
+
+        private void FlushWrappedTarget(AsyncContinuation asyncContinuation)
         {
             var wrappedContinuation = _pendingManualFlushList.RegisterCompletionNotification(asyncContinuation);
             WrappedTarget.Flush(wrappedContinuation);

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,12 +38,12 @@ namespace NLog.Layouts
     using System.Diagnostics;
     using System.Reflection;
     using System.Text;
-    using Common;
-    using Conditions;
-    using Config;
-    using Internal;
-    using LayoutRenderers;
-    using LayoutRenderers.Wrappers;
+    using NLog.Common;
+    using NLog.Conditions;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.LayoutRenderers;
+    using NLog.LayoutRenderers.Wrappers;
 
     /// <summary>
     /// Parses layout strings.
@@ -78,7 +78,7 @@ namespace NLog.Layouts
                         }
                         else
                         {
-                            //dont treat \ as escape char and just read it
+                            //don't treat \ as escape char and just read it
                             literalBuf.Append('\\');
                         }
                         continue;
@@ -98,7 +98,7 @@ namespace NLog.Layouts
                 //detect `${` (new layout-renderer)
                 if (ch == '$' && sr.Peek() == '{')
                 {
-                    //stach already found layout-renderer.
+                    //stash already found layout-renderer.
                     AddLiteral(literalBuf, result);
 
                     LayoutRenderer newLayoutRenderer = ParseLayoutRenderer(configurationItemFactory, sr);
@@ -198,9 +198,13 @@ namespace NLog.Layouts
 
                 if (ch == '\\')
                 {
-                    // skip the backslash
                     sr.Read();
 
+                    // issue#3193
+                    if (nestLevel != 0)
+                    {
+                        nameBuf.Append((char)ch);
+                    }
                     // append next character
                     nameBuf.Append((char)sr.Read());
                     continue;
@@ -230,7 +234,7 @@ namespace NLog.Layouts
                 // which can not be used directly as they are used as tokens by the parser
                 // All escape codes listed in the following link were included
                 // in addition to "\{", "\}", "\:" which are NLog specific:
-                // http://blogs.msdn.com/b/csharpfaq/archive/2004/03/12/what-character-escape-sequences-are-available.aspx
+                // https://blogs.msdn.com/b/csharpfaq/archive/2004/03/12/what-character-escape-sequences-are-available.aspx
                 if (ch == '\\')
                 {
                     // skip the backslash
@@ -432,7 +436,7 @@ namespace NLog.Layouts
                     throw;
                 }
                 InternalLogger.Error(ex, "Error parsing layout {0} will be ignored.", name);
-                //replace with emptys
+                // replace with empty values
                 layoutRenderer = new LiteralLayoutRenderer(string.Empty);
             }
             return layoutRenderer;
@@ -482,7 +486,7 @@ namespace NLog.Layouts
 
         private static bool CanBeConvertedToLiteral(LayoutRenderer lr)
         {
-            foreach (IRenderable renderable in ObjectGraphScanner.FindReachableObjects<IRenderable>(lr))
+            foreach (IRenderable renderable in ObjectGraphScanner.FindReachableObjects<IRenderable>(true, lr))
             {
                 if (renderable.GetType() == typeof(SimpleLayout))
                 {

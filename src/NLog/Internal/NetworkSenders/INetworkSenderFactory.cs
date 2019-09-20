@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,23 +33,35 @@
 
 namespace NLog.Internal.NetworkSenders
 {
+    using System;
+
     /// <summary>
     /// Creates instances of <see cref="NetworkSender"/> objects for given URLs.
     /// </summary>
     internal interface INetworkSenderFactory
     {
+#if !SILVERLIGHT
         /// <summary>
         /// Creates a new instance of the network sender based on a network URL.
         /// </summary>
-        /// <param name="url">
-        /// URL that determines the network sender to be created.
-        /// </param>
-        /// <param name="maxQueueSize">
-        /// The maximum queue size.
-        /// </param>
+        /// <param name="url">URL that determines the network sender to be created.</param>
+        /// <param name="maxQueueSize">The maximum queue size.</param>
+        /// <param name="sslProtocols">SSL protocols for TCP</param>
+        /// <param name="keepAliveTime">KeepAliveTime for TCP</param>
+        /// <returns>
+        /// A newly created network sender.
+        /// </returns>
+        NetworkSender Create(string url, int maxQueueSize, System.Security.Authentication.SslProtocols sslProtocols, TimeSpan keepAliveTime);
+#else
+        /// <summary>
+        /// Creates a new instance of the network sender based on a network URL.
+        /// </summary>
+        /// <param name="url">URL that determines the network sender to be created.</param>
+        /// <param name="maxQueueSize">The maximum queue size.</param>
         /// <returns>
         /// A newly created network sender.
         /// </returns>
         NetworkSender Create(string url, int maxQueueSize);
+#endif
     }
 }

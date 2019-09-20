@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -75,6 +75,9 @@ namespace NLog.UnitTests.MessageTemplates
         [InlineData("if its {yes}, it should not be {no}", new object[] { true, false }, "if its true, it should not be false")]
         [InlineData("Always use the correct {enum}", new object[] { NLog.Config.ExceptionRenderingFormat.Method }, "Always use the correct Method")]
         [InlineData("Always use the correct {enum:D}", new object[] { NLog.Config.ExceptionRenderingFormat.Method }, "Always use the correct 4")]
+        [InlineData("hello {0,-10}", new object[] { null }, "hello NULL      ")]
+        [InlineData("hello {0,10}", new object[] { null }, "hello       NULL")]
+        [InlineData("Status [0x{status:X8}]", new object[] { 16 }, "Status [0x00000010]")]
         public void RenderTest(string input, object[] args, string expected)
         {
             var culture = CultureInfo.InvariantCulture;
@@ -90,6 +93,39 @@ namespace NLog.UnitTests.MessageTemplates
             var culture = new CultureInfo(language);
 
             RenderAndTest(input, culture, args, expected);
+        }
+
+        [Theory]
+        [InlineData("test {0:u}", "1970-01-01", "test 1970-01-01 00:00:00Z")]
+        [InlineData("test {0:MM/dd/yy}", "1970-01-01", "test 01/01/70")]
+        public void RenderDateTime(string input, string arg, string expected)
+        {
+            var culture = CultureInfo.InvariantCulture;
+
+            DateTime dt = DateTime.Parse(arg, culture, DateTimeStyles.AdjustToUniversal);
+            RenderAndTest(input, culture, new object[] { dt }, expected);
+        }
+
+        [Theory]
+        [InlineData("test {0:c}", "1:2:3:4.5", "test 1.02:03:04.5000000")]
+        [InlineData("test {0:hh\\:mm\\:ss\\.ff}", "1:2:3:4.5", "test 02:03:04.50")]
+        public void RenderTimeSpan(string input, string arg, string expected)
+        {
+            var culture = CultureInfo.InvariantCulture;
+
+            TimeSpan ts = TimeSpan.Parse(arg, culture);
+            RenderAndTest(input, culture, new object[] { ts }, expected);
+        }
+
+        [Theory]
+        [InlineData("test {0:u}", "1 Jan 1970 01:02:03Z", "test 1970-01-01 01:02:03Z")]
+        [InlineData("test {0:s}", "1 Jan 1970 01:02:03Z", "test 1970-01-01T01:02:03")]
+        public void RenderDateTimeOffset(string input, string arg, string expected)
+        {
+            var culture = CultureInfo.InvariantCulture;
+
+            DateTimeOffset dto = DateTimeOffset.Parse(arg, culture, DateTimeStyles.AdjustToUniversal);
+            RenderAndTest(input, culture, new object[] { dto }, expected);
         }
 
         private static void RenderAndTest(string input, CultureInfo culture, object[] args, string expected)

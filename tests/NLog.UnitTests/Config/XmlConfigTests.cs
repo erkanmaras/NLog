@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,7 +33,9 @@
 
 
 using System;
+using System.IO;
 using NLog.Common;
+using NLog.Config;
 using NLog.Targets.Wrappers;
 using Xunit;
 using Xunit.Extensions;
@@ -48,7 +50,7 @@ namespace NLog.UnitTests.Config
             using (new InternalLoggerScope())
             {
                 var xml = "<nlog></nlog>";
-                var config = CreateConfigurationFromString(xml);
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
 
                 Assert.False(config.AutoReload);
                 Assert.True(config.InitializeSucceeded);
@@ -57,6 +59,7 @@ namespace NLog.UnitTests.Config
                 Assert.False(InternalLogger.LogToConsole);
                 Assert.False(InternalLogger.LogToConsoleError);
                 Assert.Null(InternalLogger.LogWriter);
+                Assert.Equal(LogLevel.Off, InternalLogger.LogLevel);
             }
         }
 
@@ -65,20 +68,53 @@ namespace NLog.UnitTests.Config
         {
             using (new InternalLoggerScope(true))
             {
-                var xml = "<nlog autoreload='true' logfile='test.txt' internalLogIncludeTimestamp='false' internalLogToConsole='true' internalLogToConsoleError='true'></nlog>";
-                var config = CreateConfigurationFromString(xml);
+                var xml = "<nlog logfile='test.txt' internalLogIncludeTimestamp='false' internalLogToConsole='true' internalLogToConsoleError='true'></nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
 
-                Assert.True(config.AutoReload);
+                Assert.False(config.AutoReload);
                 Assert.True(config.InitializeSucceeded);
                 Assert.Equal("", InternalLogger.LogFile);
                 Assert.False(InternalLogger.IncludeTimestamp);
                 Assert.True(InternalLogger.LogToConsole);
                 Assert.True(InternalLogger.LogToConsoleError);
                 Assert.Null(InternalLogger.LogWriter);
+                Assert.Equal(LogLevel.Info, InternalLogger.LogLevel);
             }
         }
 
+        [Fact]
+        public void ParseNLogInternalLoggerPathTest()
+        {
+            using (new InternalLoggerScope(true))
+            {
+                var xml = "<nlog internalLogFile='${CurrentDir}test.txt'></nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+                Assert.Contains(System.IO.Directory.GetCurrentDirectory(), InternalLogger.LogFile);
+            }
 
+            using (new InternalLoggerScope(true))
+            {
+                var xml = "<nlog internalLogFile='${BaseDir}test.txt'></nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+                Assert.Contains(AppDomain.CurrentDomain.BaseDirectory, InternalLogger.LogFile);
+            }
+
+            using (new InternalLoggerScope(true))
+            {
+                var xml = "<nlog internalLogFile='${TempDir}test.txt'></nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+                Assert.Contains(System.IO.Path.GetTempPath(), InternalLogger.LogFile);
+            }
+
+            using (new InternalLoggerScope(true))
+            {
+                var userName = Environment.GetEnvironmentVariable("USERNAME") ?? string.Empty;
+                var xml = "<nlog internalLogFile='%USERNAME%_test.txt'></nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+                if (!string.IsNullOrEmpty(userName))
+                    Assert.Contains(userName, InternalLogger.LogFile);
+            }
+        }
 
         [Theory]
         [InlineData("0:0:0:1", 1)]
@@ -89,11 +125,11 @@ namespace NLog.UnitTests.Config
         [InlineData("000:0000:000:001", 1)]
         [InlineData("0:0:1:1", 61)]
         [InlineData("1:0:0", 3600)] // 1 hour
-        [InlineData("2:3:4", 7384)] 
+        [InlineData("2:3:4", 7384)]
         [InlineData("1:0:0:0", 86400)] //1 day
         public void SetTimeSpanFromXmlTest(string interval, int seconds)
         {
-            var config = CreateConfigurationFromString($@"
+            var config = XmlLoggingConfiguration.CreateFromXmlString($@"
             <nlog throwExceptions='true'>
                 <targets>
                     <wrapper-target name='limiting' type='LimitingWrapper' messagelimit='5'  interval='{interval}'>
@@ -108,8 +144,135 @@ namespace NLog.UnitTests.Config
             var target = config.FindTargetByName<LimitingTargetWrapper>("limiting");
             Assert.NotNull(target);
             Assert.Equal(TimeSpan.FromSeconds(seconds), target.Interval);
-
         }
 
+        [Fact]
+        public void InvalidInternalLogLevel_shouldNotSetLevel()
+        {
+            using (new InternalLoggerScope(true))
+            using (new NoThrowNLogExceptions())
+            {
+                // Arrange
+                InternalLogger.LogLevel = LogLevel.Error;
+                var xml = @"<nlog  internalLogLevel='none' >
+                    </nlog>";
+
+                // Act
+                XmlLoggingConfiguration.CreateFromXmlString(xml);
+
+                // Assert
+                Assert.Equal(LogLevel.Error, InternalLogger.LogLevel);
+            }
+        }
+
+        [Fact]
+        public void InvalidNLogAttributeValues_shouldNotBreakLogging()
+        {
+            using (new InternalLoggerScope(true))
+            using (new NoThrowNLogExceptions())
+            {
+                // Arrange
+                var xml = @"<nlog internalLogLevel='oops' globalThreshold='noooos'>
+                        <targets>
+                            <target name='debug' type='Debug' layout='${message}' />
+                        </targets>
+                        <rules>
+                            <logger name='*' minlevel='debug' appendto='debug' />
+                         </rules>
+                    </nlog>";
+                var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+                LogManager.Configuration = config;
+                var logger = LogManager.GetLogger("InvalidInternalLogLevel_shouldNotBreakLogging");
+
+                // Act
+                logger.Debug("message 1");
+
+                // Assert
+                var message = GetDebugLastMessage("debug");
+                Assert.Equal("message 1", message);
+            }
+        }
+
+        [Fact]
+        public void XmlConfig_ParseUtf8Encoding_WithoutHyphen()
+        {
+            // Arrange
+            var xml = @"<nlog>
+                    <targets>
+                        <target name='file' type='File' encoding='utf8' layout='${message}' fileName='hello.txt' />
+                    </targets>
+                    <rules>
+                        <logger name='*' minlevel='debug' appendto='file' />
+                    </rules>
+                </nlog>";
+            var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+
+            Assert.Single(config.AllTargets);
+            Assert.Equal(System.Text.Encoding.UTF8, (config.AllTargets[0] as NLog.Targets.FileTarget)?.Encoding);
+        }
+
+        [Fact]
+        public void XmlConfig_ParseFilter_WithoutAttributes()
+        {
+            // Arrange
+            var xml = @"<nlog>
+                    <targets>
+                        <target name='debug' type='Debug' layout='${message}' />
+                    </targets>
+                    <rules>
+                        <logger name='*' minlevel='debug' appendto='debug' defaultFilterResult='ignore'>
+                            <filters>
+                                <whenContains />
+                            </filters>
+                        </logger>
+                    </rules>
+                </nlog>";
+
+            var config = XmlLoggingConfiguration.CreateFromXmlString(xml);
+            Assert.Single(config.LoggingRules);
+            Assert.Single(config.LoggingRules[0].Filters);
+        }
+
+        [Theory]
+        [InlineData("xsi")]
+        [InlineData("test")]
+        public void XmlConfig_attributes_shouldNotLogWarningsToInternalLog(string @namespace)
+        {
+            // Arrange
+            var xml = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<nlog xmlns=""http://www.nlog-project.org/schemas/NLog.xsd"" 
+      xmlns:{@namespace}=""http://www.w3.org/2001/XMLSchema-instance"" 
+      {@namespace}:schemaLocation=""somewhere"" 
+      {@namespace}:type=""asa""
+      internalLogToConsole=""true"" internalLogLevel=""Warn"">
+</nlog>";
+
+
+            try
+            {
+
+                // ReSharper disable once UnusedVariable
+                var factory = ConfigurationItemFactory.Default; // retrieve factory for calling preload and so won't assert those warnings
+
+                TextWriter textWriter = new StringWriter();
+                InternalLogger.LogWriter = textWriter;
+                InternalLogger.IncludeTimestamp = false;
+
+                // Act
+                XmlLoggingConfiguration.CreateFromXmlString(xml);
+
+                // Assert
+                InternalLogger.LogWriter.Flush();
+
+                var warning = textWriter.ToString();
+                Assert.Equal("", warning);
+            }
+            finally
+            {
+                // cleanup
+                InternalLogger.LogWriter = null;
+            }
+        }
     }
 }
+

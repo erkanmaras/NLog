@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,23 +36,19 @@ namespace NLog.LayoutRenderers
     using System;
     using System.Globalization;
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Log event context data. See <see cref="LogEventInfo.Properties"/>.
     /// </summary>
     [LayoutRenderer("event-properties")]
     [ThreadAgnostic]
-    public class EventPropertiesLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    [MutableUnsafe]
+    public class EventPropertiesLayoutRenderer : LayoutRenderer, IRawValue, IStringValueRenderer
     {
-        /// <summary>
-        ///  Log event context data with default options.
-        /// </summary>
-        public EventPropertiesLayoutRenderer()
-        {
-            Culture = CultureInfo.InvariantCulture;
-        }
+        private readonly ObjectPropertyHelper _objectPropertyHelper = new ObjectPropertyHelper();
 
         /// <summary>
         /// Gets or sets the name of the item.
@@ -65,27 +61,82 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// Format string for conversion from object to string.
         /// </summary>
+        /// <docgen category='Rendering Options' order='50' />
         public string Format { get; set; }
 
         /// <summary>
         /// Gets or sets the culture used for rendering. 
         /// </summary>
-        /// <docgen category='Rendering Options' order='10' />
-        public CultureInfo Culture { get; set; }
+        /// <docgen category='Rendering Options' order='100' />
+        public CultureInfo Culture { get; set; } = CultureInfo.InvariantCulture;
 
         /// <summary>
-        /// Renders the specified log event context item and appends it to the specified <see cref="StringBuilder" />.
+        /// Gets or sets the object-property-navigation-path for lookup of nested property
         /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <docgen category='Rendering Options' order='20' />
+        public string ObjectPath
+        {
+            get => _objectPropertyHelper.ObjectPath;
+            set => _objectPropertyHelper.ObjectPath = value;
+        }
+
+        /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            object value;
-            if (logEvent.HasProperties && logEvent.Properties.TryGetValue(Item, out value))
+            if (TryGetValue(logEvent, out var value))
             {
                 var formatProvider = GetFormatProvider(logEvent, Culture);
                 builder.AppendFormattedValue(value, Format, formatProvider);
             }
+        }
+
+        /// <inheritdoc/>
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            TryGetValue(logEvent, out value);
+            return true;
+        }
+
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => GetStringValue(logEvent);
+
+        private bool TryGetValue(LogEventInfo logEvent, out object value)
+        {
+            value = null;
+
+            if (!logEvent.HasProperties)
+                return false;
+
+            if (!logEvent.Properties.TryGetValue(Item, out value))
+                return false;
+
+            if (ObjectPath != null)
+            {
+                if (_objectPropertyHelper.TryGetObjectProperty(value, out var rawValue))
+                {
+                    value = rawValue;
+                }
+                else
+                {
+                    value = null;
+                }
+            }
+
+            return true;
+        }
+
+        private string GetStringValue(LogEventInfo logEvent)
+        {
+            if (Format != MessageTemplates.ValueFormatter.FormatAsJson)
+            {
+                if (TryGetValue(logEvent, out var value))
+                {
+                    string stringValue = FormatHelper.TryFormatToString(value, Format, GetFormatProvider(logEvent, Culture));
+                    return stringValue;
+                }
+                return string.Empty;
+            }
+            return null;
         }
     }
 }

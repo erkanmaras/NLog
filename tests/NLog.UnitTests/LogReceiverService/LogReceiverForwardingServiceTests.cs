@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,9 +31,10 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Config;
+
 namespace NLog.UnitTests.LogReceiverService
 {
-#if !NETSTANDARD1_5
     using System;
     using NLog.LogReceiverService;
     using Xunit;
@@ -43,7 +44,7 @@ namespace NLog.UnitTests.LogReceiverService
         [Fact]
         public void ToLogEventInfoTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets>
                     <target name='debug1' type='Debug' layout='${message} ${event-context:foo} ${event-context:bar} ${event-context:baz}' />
@@ -96,5 +97,4 @@ namespace NLog.UnitTests.LogReceiverService
             AssertDebugLastMessage("debug3", "message1 logger1 logger2 zzz");
         }
     }
-#endif
 }

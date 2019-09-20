@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,9 +33,11 @@
 
 namespace NLog.LayoutRenderers.Wrappers
 {
+    using System;
     using System.Text;
-    using Config;
-    using Layouts;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Layouts;
 
     /// <summary>
     /// Outputs alternative layout when the inner layout produces empty result.
@@ -43,8 +45,11 @@ namespace NLog.LayoutRenderers.Wrappers
     [LayoutRenderer("whenEmpty")]
     [AmbientProperty("WhenEmpty")]
     [ThreadAgnostic]
-    public sealed class WhenEmptyLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
+    [ThreadSafe]
+    public sealed class WhenEmptyLayoutRendererWrapper : WrapperLayoutRendererBuilderBase, IRawValue, IStringValueRenderer
     {
+        private bool _skipStringValueRenderer;
+
         /// <summary>
         /// Gets or sets the layout to be rendered when original layout produced empty result.
         /// </summary>
@@ -52,28 +57,89 @@ namespace NLog.LayoutRenderers.Wrappers
         [RequiredParameter]
         public Layout WhenEmpty { get; set; }
 
-        /// <summary>
-        /// Transforms the output of another layout.
-        /// </summary>
-        /// <param name="target">Output to be transform.</param>
-        protected override void TransformFormattedMesssage(StringBuilder target)
+        /// <inheritdoc/>
+        protected override void InitializeLayoutRenderer()
         {
+            base.InitializeLayoutRenderer();
+            WhenEmpty?.Initialize(LoggingConfiguration);
+            _skipStringValueRenderer = !TryGetStringValue(out _, out _);
         }
 
-        /// <summary>
-        /// Renders the inner layout contents.
-        /// </summary>
-        /// <param name="logEvent">The log event.</param>
-        /// <param name="target"><see cref="StringBuilder"/> for the result</param>
-        protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
-            int orgLength = target.Length;
-            base.RenderFormattedMessage(logEvent, target);
-            if (target.Length > orgLength)
+            Inner.RenderAppendBuilder(logEvent, builder);
+            if (builder.Length > orgLength)
                 return;
 
             // render WhenEmpty when the inner layout was empty
-            WhenEmpty.RenderAppendBuilder(logEvent, target);
+            WhenEmpty.RenderAppendBuilder(logEvent, builder);
+        }
+
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent)
+        {
+            if (_skipStringValueRenderer)
+            {
+                return null;
+            }
+
+            if (TryGetStringValue(out var innerLayout, out var whenEmptyLayout))
+            {
+                var innerValue = innerLayout.Render(logEvent);
+                if (!string.IsNullOrEmpty(innerValue))
+                {
+                    return innerValue;
+                }
+
+                // render WhenEmpty when the inner layout was empty
+                return whenEmptyLayout.Render(logEvent);
+            }
+
+            _skipStringValueRenderer = true;
+            return null;
+        }
+
+        private bool TryGetStringValue(out SimpleLayout innerLayout, out SimpleLayout whenEmptyLayout)
+        {
+            whenEmptyLayout = WhenEmpty as SimpleLayout;
+            innerLayout = Inner as SimpleLayout;
+
+            return IsStringLayout(innerLayout) && IsStringLayout(whenEmptyLayout);
+        }
+
+        private static bool IsStringLayout(SimpleLayout innerLayout)
+        {
+            return innerLayout != null && (innerLayout.IsFixedText || innerLayout.IsSimpleStringText);
+        }
+
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            if (Inner.TryGetRawValue(logEvent, out var innerValue))
+            {
+                if (innerValue != null && !innerValue.Equals(string.Empty))
+                {
+                    value = innerValue;
+                    return true;
+                }
+            }
+            else
+            {
+                var innerResult = Inner.Render(logEvent); // Beware this can be very expensive call
+                if (!string.IsNullOrEmpty(innerResult))
+                {
+                    value = null;
+                    return false;
+                }
+            }
+
+            // render WhenEmpty when the inner layout was empty
+            return WhenEmpty.TryGetRawValue(logEvent, out value);
+        }
+
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
+        protected override void TransformFormattedMesssage(StringBuilder target)
+        {
         }
     }
 }

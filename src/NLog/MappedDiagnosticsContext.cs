@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -44,13 +44,32 @@ namespace NLog
     /// <summary>
     /// Mapped Diagnostics Context - a thread-local structure that keeps a dictionary
     /// of strings and provides methods to output them in layouts. 
-    /// Mostly for compatibility with log4net.
     /// </summary>
     public static class MappedDiagnosticsContext
     {
-        private static readonly object dataSlot = ThreadLocalStorageHelper.AllocateDataSlot();
+        private static readonly object DataSlot = ThreadLocalStorageHelper.AllocateDataSlot();
 
         private static readonly IDictionary<string, object> EmptyDefaultDictionary = new SortHelpers.ReadOnlySingleBucketDictionary<string, object>();
+
+        private sealed class ItemRemover : IDisposable
+        {
+            private readonly string _item;
+            private bool _disposed;
+
+            public ItemRemover(string item)
+            {
+                _item = item;
+            }
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    _disposed = true;
+                    Remove(_item);
+                }
+            }
+        }
 
         /// <summary>
         /// Gets the thread-local dictionary
@@ -59,11 +78,35 @@ namespace NLog
         /// <returns></returns>
         private static IDictionary<string, object> GetThreadDictionary(bool create = true)
         {
-            var dictionary = ThreadLocalStorageHelper.GetDataForSlot<Dictionary<string, object>>(dataSlot, create);
+            var dictionary = ThreadLocalStorageHelper.GetDataForSlot<Dictionary<string, object>>(DataSlot, create);
             if (dictionary == null && !create)
                 return EmptyDefaultDictionary;
 
             return dictionary;
+        }
+
+        /// <summary>
+        /// Sets the current thread MDC item to the specified value.
+        /// </summary>
+        /// <param name="item">Item name.</param>
+        /// <param name="value">Item value.</param>
+        /// <returns>An <see cref="IDisposable"/> that can be used to remove the item from the current thread MDC.</returns>
+        public static IDisposable SetScoped(string item, string value)
+        {
+            Set(item, value);
+            return new ItemRemover(item);
+        }
+
+        /// <summary>
+        /// Sets the current thread MDC item to the specified value.
+        /// </summary>
+        /// <param name="item">Item name.</param>
+        /// <param name="value">Item value.</param>
+        /// <returns>>An <see cref="IDisposable"/> that can be used to remove the item from the current thread MDC.</returns>
+        public static IDisposable SetScoped(string item, object value)
+        {
+            Set(item, value);
+            return new ItemRemover(item);
         }
 
         /// <summary>

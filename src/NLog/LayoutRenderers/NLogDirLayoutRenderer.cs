@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,7 +33,7 @@
 
 using NLog.Internal;
 
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !NETSTANDARD1_3
 
 namespace NLog.LayoutRenderers
 {
@@ -41,7 +41,7 @@ namespace NLog.LayoutRenderers
     using System.IO;
     using System.Text;
 
-    using Config;
+    using NLog.Config;
 
     /// <summary>
     /// The directory where NLog.dll is located.
@@ -49,6 +49,7 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("nlogdir")]
     [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public class NLogDirLayoutRenderer : LayoutRenderer
     {
         /// <summary>
@@ -57,7 +58,7 @@ namespace NLog.LayoutRenderers
         static NLogDirLayoutRenderer()
         {
             var assembly = typeof(LogManager).GetAssembly();
-            var location = !String.IsNullOrEmpty(assembly.Location)
+            var location = !string.IsNullOrEmpty(assembly.Location)
                 ? assembly.Location
                 : new Uri(assembly.CodeBase).LocalPath;
             NLogDir = Path.GetDirectoryName(location);
@@ -77,6 +78,26 @@ namespace NLog.LayoutRenderers
 
         private static string NLogDir { get; set; }
 
+        private string _nlogCombinedPath;
+
+        /// <summary>
+        /// Initializes the layout renderer.
+        /// </summary>
+        protected override void InitializeLayoutRenderer()
+        {
+            _nlogCombinedPath = null;
+            base.InitializeLayoutRenderer();
+        }
+
+        /// <summary>
+        /// Closes the layout renderer.
+        /// </summary>
+        protected override void CloseLayoutRenderer()
+        {
+            _nlogCombinedPath = null;
+            base.CloseLayoutRenderer();
+        }
+
         /// <summary>
         /// Renders the directory where NLog is located and appends it to the specified <see cref="StringBuilder" />.
         /// </summary>
@@ -84,7 +105,7 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            var path = PathHelpers.CombinePaths(NLogDir, Dir, File);
+            var path = _nlogCombinedPath ?? (_nlogCombinedPath = PathHelpers.CombinePaths(NLogDir, Dir, File));
             builder.Append(path);
         }
     }

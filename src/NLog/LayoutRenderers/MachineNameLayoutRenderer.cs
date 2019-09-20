@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,9 +37,9 @@ namespace NLog.LayoutRenderers
 {
     using System;
     using System.Text;
-    using Common;
-    using Config;
-    using Internal;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The machine name that the process is running on.
@@ -47,41 +47,39 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("machinename")]
     [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public class MachineNameLayoutRenderer : LayoutRenderer
     {
-        internal string MachineName { get; private set; }
+        private string _machineName;
 
-        /// <summary>
-        /// Initializes the layout renderer.
-        /// </summary>
+        /// <inheritdoc/>
         protected override void InitializeLayoutRenderer()
         {
             base.InitializeLayoutRenderer();
             try
             {
-                MachineName = Environment.MachineName;
+                _machineName = EnvironmentHelper.GetMachineName();
+                if (string.IsNullOrEmpty(_machineName))
+                {
+                    InternalLogger.Info("MachineName is not available.");
+                }
             }
             catch (Exception exception)
             {
                 InternalLogger.Error(exception, "Error getting machine name.");
-
                 if (exception.MustBeRethrown())
                 {
                     throw;
                 }
 
-                MachineName = string.Empty;
+                _machineName = string.Empty;
             }
         }
 
-        /// <summary>
-        /// Renders the machine name and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            builder.Append(MachineName);
+            builder.Append(_machineName);
         }
     }
 }

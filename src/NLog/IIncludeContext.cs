@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,11 +36,8 @@ namespace NLog
     /// <summary>
     /// Include context properties
     /// </summary>
-    public interface IIncludeContext
+    internal interface IIncludeContext
     {
-
-
-
         /// <summary>
         /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsContext"/> dictionary.
         /// </summary>
@@ -59,8 +56,7 @@ namespace NLog
         /// <docgen category='Payload Options' order='10' />
         bool IncludeAllProperties { get; set; }
 
-#if NET4_0 || NET4_5
-
+#if !SILVERLIGHT
 
         /// <summary>
         /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsLogicalContext"/> dictionary.

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,14 +36,12 @@ namespace NLog
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
-    using System.Linq;
     using System.Reflection;
-    using System.Threading;
     using JetBrains.Annotations;
-    using Common;
-    using Config;
-    using Filters;
-    using Internal;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Filters;
+    using NLog.Internal;
 
     /// <summary>
     /// Implementation of logging engine.
@@ -51,131 +49,128 @@ namespace NLog
     internal static class LoggerImpl
     {
         private const int StackTraceSkipMethods = 0;
-        private static readonly Assembly nlogAssembly = typeof(LoggerImpl).GetAssembly();
-        private static readonly Assembly mscorlibAssembly = typeof(string).GetAssembly();
-        private static readonly Assembly systemAssembly = typeof(Debug).GetAssembly();
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", Justification = "Using 'NLog' in message.")]
-        internal static void Write([NotNull] Type loggerType, TargetWithFilterChain targets, LogEventInfo logEvent, LogFactory factory)
+        internal static void Write([NotNull] Type loggerType, [NotNull] TargetWithFilterChain targetsForLevel, LogEventInfo logEvent, LogFactory factory)
         {
-            if (targets == null)
-            {
-                return;
-            }
-
-            StackTraceUsage stu = targets.GetStackTraceUsage();
-
+#if !NETSTANDARD1_0 || NETSTANDARD1_5
+            StackTraceUsage stu = targetsForLevel.GetStackTraceUsage();
             if (stu != StackTraceUsage.None && !logEvent.HasStackTrace)
             {
-                StackTrace stackTrace;
 #if NETSTANDARD1_5
-                stackTrace = (StackTrace)Activator.CreateInstance(typeof(StackTrace), new object[] { stu == StackTraceUsage.WithSource });
+                var stackTrace = (StackTrace)Activator.CreateInstance(typeof(StackTrace), new object[] { stu == StackTraceUsage.WithSource });
 #elif !SILVERLIGHT
-                stackTrace = new StackTrace(StackTraceSkipMethods, stu == StackTraceUsage.WithSource);
+                var stackTrace = new StackTrace(StackTraceSkipMethods, stu == StackTraceUsage.WithSource);
 #else
-                stackTrace = new StackTrace();
+                var stackTrace = new StackTrace();
 #endif
-
-                int firstUserFrame = FindCallingMethodOnStackTrace(stackTrace, loggerType);
-
-                logEvent.SetStackTrace(stackTrace, firstUserFrame);
+                var stackFrames = stackTrace.GetFrames();
+                int? firstUserFrame = FindCallingMethodOnStackTrace(stackFrames, loggerType);
+                int? firstLegacyUserFrame = firstUserFrame.HasValue ? SkipToUserStackFrameLegacy(stackFrames, firstUserFrame.Value) : (int?)null;
+                logEvent.GetCallSiteInformationInternal().SetStackTrace(stackTrace, firstUserFrame ?? 0, firstLegacyUserFrame);
             }
+#endif
 
             AsyncContinuation exceptionHandler = (ex) => { };
             if (factory.ThrowExceptions)
             {
-                int originalThreadId = Thread.CurrentThread.ManagedThreadId;
+                int originalThreadId = AsyncHelpers.GetManagedThreadId();
                 exceptionHandler = ex =>
                 {
-                    if (ex != null)
+                    if (ex != null && AsyncHelpers.GetManagedThreadId() == originalThreadId)
                     {
-                        if (Thread.CurrentThread.ManagedThreadId == originalThreadId)
-                        {
-                            throw new NLogRuntimeException("Exception occurred in NLog", ex);
-                        }
+                        throw new NLogRuntimeException("Exception occurred in NLog", ex);
                     }
                 };
             }
 
-            for (var t = targets; t != null; t = t.NextInChain)
+            if (targetsForLevel.NextInChain == null && logEvent.CanLogEventDeferMessageFormat())
             {
-                if (!WriteToTargetWithFilterChain(t, logEvent, exceptionHandler))
+                // Change MessageFormatter so it writes directly to StringBuilder without string-allocation
+                logEvent.MessageFormatter = LogMessageTemplateFormatter.DefaultAutoSingleTarget.MessageFormatter;
+            }
+
+            IList<Filter> prevFilterChain = null;
+            FilterResult prevFilterResult = FilterResult.Neutral;
+            for (var t = targetsForLevel; t != null; t = t.NextInChain)
+            {
+                FilterResult result = ReferenceEquals(prevFilterChain, t.FilterChain) ?
+                    prevFilterResult : GetFilterResult(t.FilterChain, logEvent, t.DefaultResult);
+                if (!WriteToTargetWithFilterChain(t.Target, result, logEvent, exceptionHandler))
                 {
                     break;
                 }
+
+                prevFilterResult = result;  // Cache the result, and reuse it for the next target, if it comes from the same logging-rule
+                prevFilterChain = t.FilterChain;
             }
         }
 
         /// <summary>
         ///  Finds first user stack frame in a stack trace
         /// </summary>
-        /// <param name="stackTrace">The stack trace of the logging method invocation</param>
+        /// <param name="stackFrames">The stack trace of the logging method invocation</param>
         /// <param name="loggerType">Type of the logger or logger wrapper. This is still Logger if it's a subclass of Logger.</param>
         /// <returns>Index of the first user stack frame or 0 if all stack frames are non-user</returns>
-        internal static int FindCallingMethodOnStackTrace([NotNull] StackTrace stackTrace, [NotNull] Type loggerType)
+        internal static int? FindCallingMethodOnStackTrace(StackFrame[] stackFrames, [NotNull] Type loggerType)
         {
-            var stackFrames = stackTrace.GetFrames();
-            if (stackFrames == null)
-                return 0;
+            if (stackFrames == null || stackFrames.Length == 0)
+                return null;
 
-            //create StackFrameWithIndex so the index is know after filtering
-            var allStackFrames = stackFrames.Select((f, i) => new StackFrameWithIndex(i, f)).ToList();
-            //filter on assemblies
-            var filteredStackframes = allStackFrames.Where(p => !SkipAssembly(p.StackFrame)).ToList();
-            //find until logger type
-            var intermediate = filteredStackframes.SkipWhile(p => !IsLoggerType(p.StackFrame, loggerType));
-            //skip the logger type
-            var stackframesAfterLogger = intermediate.SkipWhile(p => IsLoggerType(p.StackFrame, loggerType)).ToList();
-
-            //get first call after logger (or skip if is moveNext)
-            var candidateStackFrames = stackframesAfterLogger;
-            if (!candidateStackFrames.Any())
+            int? firstStackFrameAfterLogger = null;
+            int? firstUserStackFrame = null;
+            for (int i = 0; i < stackFrames.Length; ++i)
             {
-                //If some calls got inlined, we can't find LoggerType on the stack. Fallback to the filteredStackframes
-                candidateStackFrames = filteredStackframes;
+                var stackFrame = stackFrames[i];
+                if (SkipAssembly(stackFrame))
+                    continue;
+
+                if (!firstUserStackFrame.HasValue)
+                    firstUserStackFrame = i;
+
+                if (IsLoggerType(stackFrame, loggerType))
+                {
+                    firstStackFrameAfterLogger = null;
+                    continue;
+                }
+
+                if (!firstStackFrameAfterLogger.HasValue)
+                    firstStackFrameAfterLogger = i;
             }
 
-            return FindIndexOfCallingMethod(allStackFrames, candidateStackFrames);
+            return firstStackFrameAfterLogger ?? firstUserStackFrame;
         }
 
         /// <summary>
-        /// Get the index which correspondens to the calling method.
-        /// 
-        /// This is most of the time the first index after <paramref name="candidateStackFrames"/>.
+        /// This is only done for legacy reason, as the correct method-name and line-number should be extracted from the MoveNext-StackFrame
         /// </summary>
-        /// <param name="allStackFrames">all the frames of the stacktrace</param>
-        /// <param name="candidateStackFrames">frames which all hiddenAssemblies are removed</param>
-        /// <returns>index on stacktrace</returns>
-        private static int FindIndexOfCallingMethod(List<StackFrameWithIndex> allStackFrames, List<StackFrameWithIndex> candidateStackFrames)
+        /// <param name="stackFrames">The stack trace of the logging method invocation</param>
+        /// <param name="firstUserStackFrame">Starting point for skipping async MoveNext-frames</param>
+        internal static int SkipToUserStackFrameLegacy(StackFrame[] stackFrames, int firstUserStackFrame)
         {
-            var stackFrameWithIndex = candidateStackFrames.FirstOrDefault();
-            var last = stackFrameWithIndex;
-
-            if (last != null)
-            {
 #if NET4_5
-                //movenext and then AsyncTaskMethodBuilder (method start)? this is a generated MoveNext by async.
-                if (last.StackFrame.GetMethod().Name == "MoveNext")
-                {
+            for (int i = firstUserStackFrame; i < stackFrames.Length; ++i)
+            {
+                var stackFrame = stackFrames[i];
+                if (SkipAssembly(stackFrame))
+                    continue;
 
-                    if (allStackFrames.Count > last.StackFrameIndex)
+                if (stackFrame.GetMethod()?.Name == "MoveNext" && stackFrames.Length > i)
+                {
+                    var nextStackFrame = stackFrames[i + 1];
+                    var declaringType = nextStackFrame.GetMethod()?.DeclaringType;
+                    if (declaringType == typeof(System.Runtime.CompilerServices.AsyncTaskMethodBuilder) ||
+                        declaringType == typeof(System.Runtime.CompilerServices.AsyncTaskMethodBuilder<>))
                     {
-                        var next = allStackFrames[last.StackFrameIndex + 1];
-                        var declaringType = next.StackFrame.GetMethod().DeclaringType;
-                        if (declaringType == typeof(System.Runtime.CompilerServices.AsyncTaskMethodBuilder) ||
-                            declaringType == typeof(System.Runtime.CompilerServices.AsyncTaskMethodBuilder<>))
-                        {
-                            //async, search futher
-                            candidateStackFrames = candidateStackFrames.Skip(1).ToList();
-                            return FindIndexOfCallingMethod(allStackFrames, candidateStackFrames);
-                        }
+                        //async, search further
+                        continue;
                     }
                 }
-#endif
 
-                return last.StackFrameIndex;
+                return i;
             }
-            return 0;
+#endif
+            return firstUserStackFrame;
         }
 
         /// <summary>
@@ -185,11 +180,8 @@ namespace NLog
         /// <returns><c>true</c>, we should skip.</returns>
         private static bool SkipAssembly(StackFrame frame)
         {
-            var method = frame.GetMethod();
-            var assembly = method.DeclaringType != null ? method.DeclaringType.GetAssembly() : method.Module.Assembly;
-            // skip stack frame if the method declaring type assembly is from hidden assemblies list
-            var skipAssembly = SkipAssembly(assembly);
-            return skipAssembly;
+            var assembly = StackTraceUsageUtils.LookupAssemblyFromStackFrame(frame);
+            return assembly == null || LogManager.IsHiddenAssembly(assembly);
         }
 
         /// <summary>
@@ -201,39 +193,13 @@ namespace NLog
         private static bool IsLoggerType(StackFrame frame, Type loggerType)
         {
             var method = frame.GetMethod();
-            Type declaringType = method.DeclaringType;
-            var isLoggerType = declaringType != null && (loggerType == declaringType || declaringType.IsSubclassOf(loggerType) || declaringType.IsSubclassOf(typeof(ILogger)));
+            Type declaringType = method?.DeclaringType;
+            var isLoggerType = declaringType != null && (loggerType == declaringType || declaringType.IsSubclassOf(loggerType) || loggerType.IsAssignableFrom(declaringType));
             return isLoggerType;
         }
 
-        private static bool SkipAssembly(Assembly assembly)
+        private static bool WriteToTargetWithFilterChain(Targets.Target target, FilterResult result, LogEventInfo logEvent, AsyncContinuation onException)
         {
-            if (assembly == nlogAssembly)
-            {
-                return true;
-            }
-
-            if (assembly == mscorlibAssembly)
-            {
-                return true;
-            }
-
-            if (assembly == systemAssembly)
-            {
-                return true;
-            }
-
-            if (LogManager.IsHiddenAssembly(assembly))
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool WriteToTargetWithFilterChain(TargetWithFilterChain targetListHead, LogEventInfo logEvent, AsyncContinuation onException)
-        {
-            FilterResult result = GetFilterResult(targetListHead.FilterChain, logEvent);
             if ((result == FilterResult.Ignore) || (result == FilterResult.IgnoreFinal))
             {
                 if (InternalLogger.IsDebugEnabled)
@@ -249,7 +215,7 @@ namespace NLog
                 return true;
             }
 
-            targetListHead.Target.WriteAsyncLogEvent(logEvent.WithContinuation(onException));
+            target.WriteAsyncLogEvent(logEvent.WithContinuation(onException));
             if (result == FilterResult.LogFinal)
             {
                 return false;
@@ -263,10 +229,11 @@ namespace NLog
         /// </summary>
         /// <param name="filterChain">The filter chain.</param>
         /// <param name="logEvent">The log event.</param>
+        /// <param name="defaultFilterResult">default result if there are no filters, or none of the filters decides.</param>
         /// <returns>The result of the filter.</returns>
-        private static FilterResult GetFilterResult(IList<Filter> filterChain, LogEventInfo logEvent)
+        private static FilterResult GetFilterResult(IList<Filter> filterChain, LogEventInfo logEvent, FilterResult defaultFilterResult)
         {
-            FilterResult result = FilterResult.Neutral;
+            FilterResult result = defaultFilterResult; 
 
             if (filterChain == null || filterChain.Count == 0)
                 return result;
@@ -281,11 +248,11 @@ namespace NLog
                     result = f.GetFilterResult(logEvent);
                     if (result != FilterResult.Neutral)
                     {
-                        break;
+                        return result;
                     }
                 }
 
-                return result;
+                return defaultFilterResult;
             }
             catch (Exception exception)
             {
@@ -297,33 +264,6 @@ namespace NLog
                 }
 
                 return FilterResult.Ignore;
-            }
-        }
-
-        /// <summary>
-        /// Stackframe with correspending index on the stracktrace
-        /// </summary>
-        private class StackFrameWithIndex
-        {
-            /// <summary>
-            /// Index of <see cref="StackFrame"/> on the stack.
-            /// </summary>
-            public int StackFrameIndex { get; private set; }
-
-            /// <summary>
-            /// A stackframe
-            /// </summary>
-            public StackFrame StackFrame { get; private set; }
-
-            /// <summary>
-            /// New item
-            /// </summary>
-            /// <param name="stackFrameIndex">Index of <paramref name="stackFrame"/> on the stack.</param>
-            /// <param name="stackFrame">A stackframe</param>
-            public StackFrameWithIndex(int stackFrameIndex, StackFrame stackFrame)
-            {
-                StackFrameIndex = stackFrameIndex;
-                StackFrame = stackFrame;
             }
         }
     }

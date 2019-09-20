@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,7 +34,6 @@
 namespace NLog.Config
 {
     using System;
-    using System.Reflection;
 
     /// <summary>
     /// Provides means to populate factories of named items (such as targets, layouts, layout renderers, etc.).
@@ -43,7 +42,7 @@ namespace NLog.Config
     {
         void Clear();
 
-        void ScanTypes(Type[] type, string prefix);
+        void ScanTypes(Type[] types, string prefix);
 
         void RegisterType(Type type, string itemNamePrefix);
     }

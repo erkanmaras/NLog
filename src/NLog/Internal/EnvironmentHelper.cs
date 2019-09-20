@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,7 +33,6 @@
 
 namespace NLog.Internal
 {
-
     using System;
     using System.Security;
 
@@ -51,19 +50,39 @@ namespace NLog.Internal
 #else
                 string newline = "\r\n";
 #endif
-
                 return newline;
             }
         }
 
-#if !SILVERLIGHT
+        internal static string GetMachineName()
+        {
+            try
+            {
+#if SILVERLIGHT
+                return "SilverLight";
+#elif NETSTANDARD1_3
+                var machineName = EnvironmentHelper.GetSafeEnvironmentVariable("COMPUTERNAME") ?? string.Empty;
+                if (string.IsNullOrEmpty(machineName))
+                    machineName = EnvironmentHelper.GetSafeEnvironmentVariable("HOSTNAME") ?? string.Empty;
+                return machineName;
+#else
+                return Environment.MachineName;
+#endif
+            }
+            catch (System.Security.SecurityException)
+            {
+                return string.Empty;
+            }
+        }
+
         internal static string GetSafeEnvironmentVariable(string name)
         {
+#if !SILVERLIGHT
             try
             {
                 string s = Environment.GetEnvironmentVariable(name);
 
-                if (s == null || s.Length == 0)
+                if (string.IsNullOrEmpty(s))
                 {
                     return null;
                 }
@@ -72,9 +91,11 @@ namespace NLog.Internal
             }
             catch (SecurityException)
             {
-                return string.Empty;
+                return null;
             }
-        }
+#else
+            return null;
 #endif
+        }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -258,10 +258,10 @@ namespace NLog.Targets
             {
                 string incrementValueString = IncrementValue.Render(logEvent);
                 long incrementValue;
-                if (Int64.TryParse(incrementValueString, out incrementValue))
+                if (long.TryParse(incrementValueString, out incrementValue))
                     perfCounter.IncrementBy(incrementValue);
                 else
-                    InternalLogger.Error("Error incrementing PerfCounter {0}. IncrementValue must be an integer but was <{1}>", CounterName, incrementValueString);
+                    InternalLogger.Error("PerfCounterTarget(Name={0}): Error incrementing PerfCounter {1}. IncrementValue must be an integer but was <{2}>", Name, CounterName, incrementValueString);
             }
         }
 
@@ -323,7 +323,7 @@ namespace NLog.Targets
                 }
                 catch (Exception exception)
                 {
-                    InternalLogger.Error(exception, "Cannot open performance counter {0}/{1}/{2}.", CategoryName, CounterName, InstanceName);
+                    InternalLogger.Error(exception, "PerfCounterTarget(Name={0}): Cannot open performance counter {1}/{2}/{3}.", Name, CategoryName, CounterName, InstanceName);
 
                     if (exception.MustBeRethrown())
                     {

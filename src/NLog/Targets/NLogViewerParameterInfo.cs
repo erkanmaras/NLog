@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,6 +40,9 @@ namespace NLog.Targets
     /// Represents a parameter to a NLogViewer target.
     /// </summary>
     [NLogConfigurationItem]
+    [ThreadAgnostic]
+    [ThreadSafe]
+    [AppDomainFixedOutput]
     public class NLogViewerParameterInfo
     {
         /// <summary>
@@ -57,10 +60,16 @@ namespace NLog.Targets
         public string Name { get; set; }
 
         /// <summary>
-        /// Gets or sets the layout that should be use to calcuate the value for the parameter.
+        /// Gets or sets the layout that should be use to calculate the value for the parameter.
         /// </summary>
         /// <docgen category='Parameter Options' order='10' />
         [RequiredParameter]
         public Layout Layout { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether an attribute with empty value should be included in the output
+        /// </summary>
+        /// <docgen category='Parameter Options' order='100' />
+        public bool IncludeEmptyValue { get; set; } = true;
     }
 }

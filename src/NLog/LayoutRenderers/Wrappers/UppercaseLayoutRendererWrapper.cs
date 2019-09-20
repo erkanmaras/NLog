@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,9 +33,11 @@
 
 namespace NLog.LayoutRenderers.Wrappers
 {
+    using System;
     using System.ComponentModel;
     using System.Globalization;
-    using Config;
+    using System.Text;
+    using NLog.Config;
 
     /// <summary>
     /// Converts the result of another layout output to upper case.
@@ -47,7 +49,9 @@ namespace NLog.LayoutRenderers.Wrappers
     /// </example>
     [LayoutRenderer("uppercase")]
     [AmbientProperty("Uppercase")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class UppercaseLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
     {
         /// <summary>
@@ -73,36 +77,45 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <docgen category='Transformation Options' order='10' />
         public CultureInfo Culture { get; set; }
 
-        /// <summary>
-        /// Post-processes the rendered message. 
-        /// </summary>
-        /// <param name="target">Output to be post-processed.</param>
-        protected override void TransformFormattedMesssage(System.Text.StringBuilder target)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
-            if (Uppercase)
+            Inner.RenderAppendBuilder(logEvent, builder);
+            if (Uppercase && builder.Length > orgLength)
             {
-                CultureInfo culture = Culture;
+                TransformToUpperCase(builder, orgLength);
+            }
+        }
 
-#if NETSTANDARD1_5
-                string stringToUpper = null;
-                if (culture != null && culture != CultureInfo.InvariantCulture)
-                {
-                    stringToUpper = target.ToString();
-                    stringToUpper = culture.TextInfo.ToUpper(stringToUpper);
-                }
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
+        protected override void TransformFormattedMesssage(StringBuilder target)
+        {
+        }
+
+        private void TransformToUpperCase(StringBuilder target, int startPos)
+        {
+            CultureInfo culture = Culture;
+
+#if NETSTANDARD1_0
+            string stringToUpper = null;
+            if (culture != null && culture != CultureInfo.InvariantCulture)
+            {
+                stringToUpper = target.ToString(startPos, target.Length - startPos);
+                stringToUpper = culture.TextInfo.ToUpper(stringToUpper);
+            }
 #endif
 
-                for (int i = 0; i < target.Length; ++i)
-                {
-#if NETSTANDARD1_5
-                    if (stringToUpper != null)
-                        target[i] = stringToUpper[i];    //no char.ToUpper with culture
-                    else
-                        target[i] = char.ToUpperInvariant(target[i]);                      
+            for (int i = startPos; i < target.Length; ++i)
+            {
+#if NETSTANDARD1_0
+                if (stringToUpper != null)
+                    target[i] = stringToUpper[i];    //no char.ToUpper with culture
+                else
+                    target[i] = char.ToUpperInvariant(target[i]);
 #else
-                    target[i] = char.ToUpper(target[i], culture);
+                target[i] = char.ToUpper(target[i], culture);
 #endif
-                }
             }
         }
     }

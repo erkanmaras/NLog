@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -53,6 +53,26 @@ namespace NLog.UnitTests.Internal
         public void IsNullOrWhiteSpaceTest(string input, bool result)
         {
             Assert.Equal(result, StringHelpers.IsNullOrWhiteSpace(input));
+        }
+
+        [Theory]
+        [InlineData("", new string [0])]
+        [InlineData("  ", new string[0])]
+        [InlineData(" , ", new string[0])]
+        [InlineData("a", new string[] { "a" })]
+        [InlineData("a ", new string[] { "a" })]
+        [InlineData(" a", new string[] { "a" })]
+        [InlineData(" a,", new string[] { "a" })]
+        [InlineData(" a, ", new string[] { "a" })]
+        [InlineData("a,b", new string[] { "a", "b" })]
+        [InlineData("a ,b", new string[] { "a", "b" })]
+        [InlineData(" a ,b", new string[] { "a", "b" })]
+        [InlineData(" a , b ", new string[] { "a", "b" })]
+        [InlineData(" a b ", new string[] { "a b" })]
+        public void SplitAndTrimToken(string input, string[] expected)
+        {
+            var result = input.SplitAndTrimTokens(',');
+            Assert.Equal(expected, result);
         }
     }
 }

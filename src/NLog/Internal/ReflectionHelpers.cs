@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,7 +38,7 @@ namespace NLog.Internal
     using System.Linq;
     using System.Linq.Expressions;
     using System.Reflection;
-    using Common;
+    using NLog.Common;
 
     /// <summary>
     /// Reflection helpers.
@@ -90,7 +90,7 @@ namespace NLog.Internal
         /// <param name="type"></param>
         /// <returns></returns>
         /// <remarks>This is a work around, as Type doesn't have this property. 
-        /// From: http://stackoverflow.com/questions/1175888/determine-if-a-type-is-static
+        /// From: https://stackoverflow.com/questions/1175888/determine-if-a-type-is-static
         /// </remarks>
         public static bool IsStaticClass(this Type type)
         {
@@ -165,7 +165,7 @@ namespace NLog.Internal
 
         public static bool IsEnum(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsEnum;
 #else
             return type.IsEnum;
@@ -174,16 +174,25 @@ namespace NLog.Internal
 
         public static bool IsPrimitive(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsPrimitive;
 #else
             return type.IsPrimitive;
 #endif
         }
 
+        public static bool IsValueType(this Type type)
+        {
+#if NETSTANDARD1_0
+            return type.GetTypeInfo().IsValueType;
+#else
+            return type.IsValueType;
+#endif
+        }
+
         public static bool IsSealed(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsSealed;
 #else
             return type.IsSealed;
@@ -192,7 +201,7 @@ namespace NLog.Internal
 
         public static bool IsAbstract(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsAbstract;
 #else
             return type.IsAbstract;
@@ -201,7 +210,7 @@ namespace NLog.Internal
 
         public static bool IsClass(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsClass;
 #else
             return type.IsClass;
@@ -210,7 +219,7 @@ namespace NLog.Internal
 
         public static bool IsGenericType(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().IsGenericType;
 #else
             return type.IsGenericType;
@@ -219,7 +228,7 @@ namespace NLog.Internal
 
         public static TAttr GetCustomAttribute<TAttr>(this Type type) where TAttr : Attribute
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             var typeInfo = type.GetTypeInfo();
             return typeInfo.GetCustomAttribute<TAttr>();
 #else
@@ -230,16 +239,26 @@ namespace NLog.Internal
         public static TAttr GetCustomAttribute<TAttr>(this PropertyInfo info)
              where TAttr : Attribute
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return info.GetCustomAttributes(typeof(TAttr), false).FirstOrDefault() as TAttr;
 #else
             return (TAttr)Attribute.GetCustomAttribute(info, typeof(TAttr));
 #endif
         }
 
+        public static TAttr GetCustomAttribute<TAttr>(this Assembly assembly)
+            where TAttr : Attribute
+        {
+#if NETSTANDARD1_0
+            return assembly.GetCustomAttributes(typeof(TAttr)).FirstOrDefault() as TAttr;
+#else
+            return (TAttr)Attribute.GetCustomAttribute(assembly, typeof(TAttr));
+#endif
+        }
+
         public static IEnumerable<TAttr> GetCustomAttributes<TAttr>(this Type type, bool inherit) where TAttr : Attribute
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             return type.GetTypeInfo().GetCustomAttributes<TAttr>(inherit);
 #else
             return (TAttr[])type.GetCustomAttributes(typeof(TAttr), inherit);
@@ -248,7 +267,7 @@ namespace NLog.Internal
 
         public static Assembly GetAssembly(this Type type)
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
             var typeInfo = type.GetTypeInfo();
             return typeInfo.Assembly;
 #else

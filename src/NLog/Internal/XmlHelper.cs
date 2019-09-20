@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,6 +34,7 @@
 namespace NLog.Internal
 {
     using System;
+    using System.Globalization;
     using System.Text;
     using System.Text.RegularExpressions;
     using System.Xml;
@@ -43,15 +44,12 @@ namespace NLog.Internal
     /// </summary>
     public static class XmlHelper
     {
-        // found on http://stackoverflow.com/questions/397250/unicode-regex-invalid-xml-characters/961504#961504
+        // found on https://stackoverflow.com/questions/397250/unicode-regex-invalid-xml-characters/961504#961504
         // filters control characters but allows only properly-formed surrogate sequences
-#if !SILVERLIGHT
+#if NET3_5 || NETSTANDARD1_0
         private static readonly Regex InvalidXmlChars = new Regex(
             @"(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFEFF\uFFFE\uFFFF]",
             RegexOptions.Compiled);
-#else
-		private static readonly Regex InvalidXmlChars = new Regex(
-			@"(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFEFF\uFFFE\uFFFF]");
 #endif
 
         /// <summary>
@@ -62,7 +60,7 @@ namespace NLog.Internal
             if (string.IsNullOrEmpty(text))
                 return string.Empty;
 
-#if NET3_5 || NETSTANDARD1_5
+#if NET3_5 || NETSTANDARD1_0
             return InvalidXmlChars.Replace(text, "");
 #else
             for (int i = 0; i < text.Length; ++i)
@@ -77,7 +75,7 @@ namespace NLog.Internal
 #endif
         }
 
-#if !NET3_5 && !NETSTANDARD1_5
+#if !NET3_5 && !NETSTANDARD1_0
         /// <summary>
         /// Cleans string of any invalid XML chars found
         /// </summary>
@@ -98,6 +96,75 @@ namespace NLog.Internal
         }
 #endif
 
+        private static readonly char[] XmlEscapeChars = new char[] { '<', '>', '&', '\'', '"' };
+        private static readonly char[] XmlEscapeNewlineChars = new char[] { '<', '>', '&', '\'', '"', '\r', '\n' };
+
+        internal static string EscapeXmlString(string text, bool xmlEncodeNewlines, StringBuilder result = null)
+        {
+            if (result == null && SmallAndNoEscapeNeeded(text, xmlEncodeNewlines))
+            {
+                return text;
+            }
+
+            var sb = result ?? new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; ++i)
+            {
+                switch (text[i])
+                {
+                    case '<':
+                        sb.Append("&lt;");
+                        break;
+
+                    case '>':
+                        sb.Append("&gt;");
+                        break;
+
+                    case '&':
+                        sb.Append("&amp;");
+                        break;
+
+                    case '\'':
+                        sb.Append("&apos;");
+                        break;
+
+                    case '"':
+                        sb.Append("&quot;");
+                        break;
+
+                    case '\r':
+                        if (xmlEncodeNewlines)
+                            sb.Append("&#13;");
+                        else
+                            sb.Append(text[i]);
+                        break;
+
+                    case '\n':
+                        if (xmlEncodeNewlines)
+                            sb.Append("&#10;");
+                        else
+                            sb.Append(text[i]);
+                        break;
+
+                    default:
+                        sb.Append(text[i]);
+                        break;
+                }
+            }
+
+            return result == null ? sb.ToString() : null;
+        }
+
+        /// <summary>
+        /// Pretest, small text and not escape needed
+        /// </summary>
+        /// <param name="text"></param>
+        /// <param name="xmlEncodeNewlines"></param>
+        /// <returns></returns>
+        private static bool SmallAndNoEscapeNeeded(string text, bool xmlEncodeNewlines)
+        {
+            return text.Length < 4096 && text.IndexOfAny(xmlEncodeNewlines ? XmlEscapeNewlineChars : XmlEscapeChars) < 0;
+        }
+
         /// <summary>
         /// Converts object value to invariant format, and strips any invalid xml-characters
         /// </summary>
@@ -105,8 +172,7 @@ namespace NLog.Internal
         /// <returns>Object value converted to string</returns>
         internal static string XmlConvertToStringSafe(object value)
         {
-            string valueString = XmlConvertToString(value);
-            return RemoveInvalidXmlChars(valueString);
+            return XmlConvertToString(value, true);
         }
 
         /// <summary>
@@ -116,8 +182,123 @@ namespace NLog.Internal
         /// <returns>Object value converted to string</returns>
         internal static string XmlConvertToString(object value)
         {
-            TypeCode objTypeCode = Convert.GetTypeCode(value);
-            return XmlConvertToString(value, objTypeCode);
+            return XmlConvertToString(value, false);
+        }
+
+        /// <summary>
+        /// XML elements must follow these naming rules:
+        ///  - Element names are case-sensitive
+        ///  - Element names must start with a letter or underscore
+        ///  - Element names can contain letters, digits, hyphens, underscores, and periods
+        ///  - Element names cannot contain spaces
+        /// </summary>
+        /// <param name="xmlElementName"></param>
+        /// <param name="allowNamespace"></param>
+        internal static string XmlConvertToElementName(string xmlElementName, bool allowNamespace)
+        {
+            if (string.IsNullOrEmpty(xmlElementName))
+                return xmlElementName;
+
+            xmlElementName = RemoveInvalidXmlChars(xmlElementName);
+
+            StringBuilder sb = null;
+            for (int i = 0; i < xmlElementName.Length; ++i)
+            {
+                char chr = xmlElementName[i];
+                if (char.IsLetter(chr))
+                {
+                    sb?.Append(chr);
+                    continue;
+                }
+
+                bool includeChr = false;
+                switch (chr)
+                {
+                    case ':':   // namespace-delimiter
+                        if (i != 0 && allowNamespace)
+                        {
+                            allowNamespace = false;
+                            sb?.Append(chr);
+                            continue;
+                        }
+                        break;
+                    case '_':
+                        sb?.Append(chr);
+                        continue;
+                    case '0':
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                    case '6':
+                    case '7':
+                    case '8':
+                    case '9':
+                    case '-':
+                    case '.':
+                        {
+                            if (i != 0)
+                            {
+                                sb?.Append(chr);
+                                continue;
+                            }
+                            includeChr = true;
+                            break;
+                        }
+                }
+
+                if (sb == null)
+                {
+                    sb = CreateStringBuilder(i);
+                }
+                sb.Append('_');
+                if (includeChr)
+                    sb.Append(chr);
+            }
+
+            sb?.TrimRight();
+            return sb?.ToString() ?? xmlElementName;
+
+            StringBuilder CreateStringBuilder(int i)
+            {
+                var sb2 = new StringBuilder(xmlElementName.Length);
+                if (i > 0)
+                    sb2.Append(xmlElementName, 0, i);
+                return sb2;
+            }
+        }
+
+        private static string XmlConvertToString(object value, bool safeConversion)
+        {
+            try
+            {
+                IConvertible convertibleValue = value as IConvertible;
+                TypeCode objTypeCode = value == null ? TypeCode.Empty : (convertibleValue?.GetTypeCode() ?? TypeCode.Object);
+                if (objTypeCode != TypeCode.Object)
+                {
+                    return XmlConvertToString(convertibleValue, objTypeCode, safeConversion);
+                }
+
+                return XmlConvertToStringInvariant(value, safeConversion);
+            }
+            catch
+            {
+                return safeConversion ? "" : null;
+            }
+        }
+
+        private static string XmlConvertToStringInvariant(object value, bool safeConversion)
+        {
+            try
+            {
+                string valueString = Convert.ToString(value, CultureInfo.InvariantCulture);
+                return safeConversion ? RemoveInvalidXmlChars(valueString) : valueString;
+            }
+            catch
+            {
+                return safeConversion ? "" : null;
+            }
         }
 
         /// <summary>
@@ -125,8 +306,9 @@ namespace NLog.Internal
         /// </summary>
         /// <param name="value">Object value</param>
         /// <param name="objTypeCode">Object TypeCode</param>
+        /// <param name="safeConversion">Check and remove unusual unicode characters from the result string.</param>
         /// <returns>Object value converted to string</returns>
-        internal static string XmlConvertToString(object value, TypeCode objTypeCode)
+        internal static string XmlConvertToString(IConvertible value, TypeCode objTypeCode, bool safeConversion = false)
         {
             if (value == null)
             {
@@ -136,56 +318,47 @@ namespace NLog.Internal
             switch (objTypeCode)
             {
                 case TypeCode.Boolean:
-                    return XmlConvert.ToString((Boolean)value);   // boolean as lowercase
+                    return XmlConvert.ToString(value.ToBoolean(CultureInfo.InvariantCulture));   // boolean as lowercase
                 case TypeCode.Byte:
-                    return XmlConvert.ToString((Byte)value);
+                    return XmlConvert.ToString(value.ToByte(CultureInfo.InvariantCulture));
                 case TypeCode.SByte:
-                    return XmlConvert.ToString((SByte)value);
+                    return XmlConvert.ToString(value.ToSByte(CultureInfo.InvariantCulture));
                 case TypeCode.Int16:
-                    return XmlConvert.ToString((Int16)value);
+                    return XmlConvert.ToString(value.ToInt16(CultureInfo.InvariantCulture));
                 case TypeCode.Int32:
-                    return XmlConvert.ToString((Int32)value);
+                    return XmlConvert.ToString(value.ToInt32(CultureInfo.InvariantCulture));
                 case TypeCode.Int64:
-                    return XmlConvert.ToString((Int64)value);
+                    return XmlConvert.ToString(value.ToInt64(CultureInfo.InvariantCulture));
                 case TypeCode.UInt16:
-                    return XmlConvert.ToString((UInt16)value);
+                    return XmlConvert.ToString(value.ToUInt16(CultureInfo.InvariantCulture));
                 case TypeCode.UInt32:
-                    return XmlConvert.ToString((UInt32)value);
+                    return XmlConvert.ToString(value.ToUInt32(CultureInfo.InvariantCulture));
                 case TypeCode.UInt64:
-                    return XmlConvert.ToString((UInt64)value);
+                    return XmlConvert.ToString(value.ToUInt64(CultureInfo.InvariantCulture));
                 case TypeCode.Single:
                     {
-                        float singleValue = (Single)value;
-                        if (float.IsInfinity(singleValue))
-                            return Convert.ToString(singleValue, System.Globalization.CultureInfo.InvariantCulture); // Infinity instead of INF
-                        else
-                            return XmlConvert.ToString(singleValue);    // 8 digits scale
+                        float singleValue = value.ToSingle(CultureInfo.InvariantCulture);
+                        return float.IsInfinity(singleValue) ?
+                            Convert.ToString(singleValue, CultureInfo.InvariantCulture) :
+                            XmlConvert.ToString(singleValue);
                     }
                 case TypeCode.Double:
                     {
-                        double doubleValue = (Double)value;
-                        if (double.IsInfinity(doubleValue))
-                            return Convert.ToString(doubleValue, System.Globalization.CultureInfo.InvariantCulture); // Infinity instead of INF
-                        else
-                            return XmlConvert.ToString(doubleValue);    // 16 digits scale
+                        double doubleValue = value.ToDouble(CultureInfo.InvariantCulture);
+                        return double.IsInfinity(doubleValue) ?
+                            Convert.ToString(doubleValue, CultureInfo.InvariantCulture) :
+                            XmlConvert.ToString(doubleValue);
                     }
                 case TypeCode.Decimal:
-                    return XmlConvert.ToString((Decimal)value);
+                    return XmlConvert.ToString(value.ToDecimal(CultureInfo.InvariantCulture));
                 case TypeCode.DateTime:
-                    return XmlConvert.ToString((DateTime)value, XmlDateTimeSerializationMode.Utc);
+                    return XmlConvert.ToString(value.ToDateTime(CultureInfo.InvariantCulture), XmlDateTimeSerializationMode.Utc);
                 case TypeCode.Char:
-                    return XmlConvert.ToString((Char)value);
+                    return XmlConvert.ToString(value.ToChar(CultureInfo.InvariantCulture));
                 case TypeCode.String:
-                    return (string)value;
+                    return safeConversion ? RemoveInvalidXmlChars(value.ToString(CultureInfo.InvariantCulture)) : value.ToString(CultureInfo.InvariantCulture);
                 default:
-                    try
-                    {
-                        return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
-                    }
-                    catch
-                    {
-                        return null;
-                    }
+                    return XmlConvertToStringInvariant(value, safeConversion);
             }
         }
 
@@ -206,14 +379,12 @@ namespace NLog.Internal
         /// Safe version of WriteAttributeString
         /// </summary>
         /// <param name="writer"></param>
-        /// <param name="thread"></param>
         /// <param name="localName"></param>
-        public static void WriteAttributeSafeString(this XmlWriter writer, string thread, string localName)
+        /// <param name="value"></param>
+        public static void WriteAttributeSafeString(this XmlWriter writer, string localName, string value)
         {
-            writer.WriteAttributeString(RemoveInvalidXmlChars(thread), RemoveInvalidXmlChars(localName));
+            writer.WriteAttributeString(RemoveInvalidXmlChars(localName), RemoveInvalidXmlChars(value));
         }
-
-
 
         /// <summary>
         /// Safe version of WriteElementSafeString

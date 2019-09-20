@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -55,6 +55,8 @@ namespace NLog.Filters
         [RequiredParameter]
         public ConditionExpression Condition { get; set; }
 
+        internal FilterResult DefaultFilterResult { get; set; } = FilterResult.Neutral;
+
         /// <summary>
         /// Checks whether log event should be logged or not.
         /// </summary>
@@ -72,7 +74,7 @@ namespace NLog.Filters
                 return Action;
             }
 
-            return FilterResult.Neutral;
+            return DefaultFilterResult;
         }
     }
 }

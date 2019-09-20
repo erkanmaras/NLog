@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,7 +36,7 @@ namespace NLog.Conditions
     using System;
     using System.Globalization;
     using System.Collections.Generic;
-    using Common;
+    using NLog.Common;
 
     /// <summary>
     /// Condition relational (<b>==</b>, <b>!=</b>, <b>&lt;</b>, <b>&lt;=</b>,
@@ -83,7 +83,7 @@ namespace NLog.Conditions
         /// </returns>
         public override string ToString()
         {
-            return "(" + LeftExpression + " " + GetOperatorString() + " " + RightExpression + ")";
+            return $"({LeftExpression} {GetOperatorString()} {RightExpression})";
         }
 
         /// <summary>
@@ -108,10 +108,10 @@ namespace NLog.Conditions
         /// <returns>Result of the given relational operator.</returns>
         private static object Compare(object leftValue, object rightValue, ConditionRelationalOperator relationalOperator)
         {
-#if !NETSTANDARD1_5
-            StringComparer comparer = StringComparer.InvariantCulture;
+#if !NETSTANDARD1_0
+            System.Collections.IComparer comparer = StringComparer.InvariantCulture;
 #else
-            var comparer = new System.Collections.Comparer(CultureInfo.InvariantCulture);
+            System.Collections.IComparer comparer = StringComparer.Ordinal;
 #endif
             PromoteTypes(ref leftValue, ref rightValue);
             switch (relationalOperator)
@@ -135,7 +135,7 @@ namespace NLog.Conditions
                     return comparer.Compare(leftValue, rightValue) < 0;
 
                 default:
-                    throw new NotSupportedException("Relational operator " + relationalOperator + " is not supported.");
+                    throw new NotSupportedException($"Relational operator {relationalOperator} is not supported.");
             }
         }
         
@@ -173,11 +173,11 @@ namespace NLog.Conditions
                 if (TryPromoteTypes(ref leftValue, rightType, ref rightValue, leftType)) return;
             }
 
-            throw new ConditionEvaluationException("Cannot find common type for '" + leftType.Name + "' and '" + rightType.Name + "'.");
+            throw new ConditionEvaluationException($"Cannot find common type for '{leftType.Name}' and '{rightType.Name}'.");
         }
         
         /// <summary>
-        /// Promoto <paramref name="val"/> to type
+        /// Promotes <paramref name="val"/> to type
         /// </summary>
         /// <param name="val"></param>
         /// <param name="type1"></param>
@@ -248,18 +248,14 @@ namespace NLog.Conditions
         /// <returns></returns>
         private static bool TryPromoteTypes(ref object val1, Type type1, ref object val2, Type type2)
         {
-            if (TryPromoteType(ref val1, type1))
-            {
-                return true;
-            }
-            return TryPromoteType(ref val2, type2);
+            return TryPromoteType(ref val1, type1) || TryPromoteType(ref val2, type2);
         }
 
         /// <summary>
         /// Get the order for the type for comparision.
         /// </summary>
         /// <param name="type1"></param>
-        /// <returns>index, 0 to maxint. Lower is first</returns>
+        /// <returns>index, 0 to max int. Lower is first</returns>
         private static int GetOrder(Type type1)
         {
             int order;
@@ -331,7 +327,7 @@ namespace NLog.Conditions
                     return "<=";
 
                 default:
-                    throw new NotSupportedException("Relational operator " + RelationalOperator + " is not supported.");
+                    throw new NotSupportedException($"Relational operator {RelationalOperator} is not supported.");
             }
         }
     }

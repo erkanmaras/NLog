@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,17 +31,17 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.Collections.Generic;
-
 namespace NLog
 {
     using System;
-    using Internal;
+    using System.Collections.Generic;
+    using System.ComponentModel;
 
     /// <summary>
     /// Defines available log levels.
     /// </summary>
-    public sealed class LogLevel : IComparable, IEquatable<LogLevel>
+    [TypeConverter(typeof(Attributes.LogLevelTypeConverter))]
+    public sealed class LogLevel : IComparable, IEquatable<LogLevel>, IConvertible
     {
         /// <summary>
         /// Trace log level.
@@ -90,10 +90,10 @@ namespace NLog
         private static readonly IList<LogLevel> allLevels = new List<LogLevel> { Trace, Debug, Info, Warn, Error, Fatal, Off }.AsReadOnly();
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Security", "CA2104:DoNotDeclareReadOnlyMutableReferenceTypes", Justification = "Type is immutable")]
-        private static readonly IList<LogLevel> allLoggingLevels = new List<LogLevel> {Trace, Debug, Info, Warn, Error, Fatal}.AsReadOnly();
+        private static readonly IList<LogLevel> allLoggingLevels = new List<LogLevel> { Trace, Debug, Info, Warn, Error, Fatal }.AsReadOnly();
 
         /// <summary>
-        /// Gets all the availiable log levels (Trace, Debug, Info, Warn, Error, Fatal, Off).
+        /// Gets all the available log levels (Trace, Debug, Info, Warn, Error, Fatal, Off).
         /// </summary>
         public static IEnumerable<LogLevel> AllLevels => allLevels;
 
@@ -188,8 +188,8 @@ namespace NLog
         /// <returns>The value of <c>level1.Ordinal &gt; level2.Ordinal</c>.</returns>
         public static bool operator >(LogLevel level1, LogLevel level2)
         {
-            if (level1 == null) { throw new ArgumentNullException("level1"); }
-            if (level2 == null) { throw new ArgumentNullException("level2"); }
+            if (level1 == null) { throw new ArgumentNullException(nameof(level1)); }
+            if (level2 == null) { throw new ArgumentNullException(nameof(level2)); }
 
             return level1.Ordinal > level2.Ordinal;
         }
@@ -204,8 +204,8 @@ namespace NLog
         /// <returns>The value of <c>level1.Ordinal &gt;= level2.Ordinal</c>.</returns>
         public static bool operator >=(LogLevel level1, LogLevel level2)
         {
-            if (level1 == null) { throw new ArgumentNullException("level1"); }
-            if (level2 == null) { throw new ArgumentNullException("level2"); }
+            if (level1 == null) { throw new ArgumentNullException(nameof(level1)); }
+            if (level2 == null) { throw new ArgumentNullException(nameof(level2)); }
 
             return level1.Ordinal >= level2.Ordinal;
         }
@@ -220,8 +220,8 @@ namespace NLog
         /// <returns>The value of <c>level1.Ordinal &lt; level2.Ordinal</c>.</returns>
         public static bool operator <(LogLevel level1, LogLevel level2)
         {
-            if (level1 == null) { throw new ArgumentNullException("level1"); }
-            if (level2 == null) { throw new ArgumentNullException("level2"); }
+            if (level1 == null) { throw new ArgumentNullException(nameof(level1)); }
+            if (level2 == null) { throw new ArgumentNullException(nameof(level2)); }
 
             return level1.Ordinal < level2.Ordinal;
         }
@@ -236,8 +236,8 @@ namespace NLog
         /// <returns>The value of <c>level1.Ordinal &lt;= level2.Ordinal</c>.</returns>
         public static bool operator <=(LogLevel level1, LogLevel level2)
         {
-            if (level1 == null) { throw new ArgumentNullException("level1"); }
-            if (level2 == null) { throw new ArgumentNullException("level2"); }
+            if (level1 == null) { throw new ArgumentNullException(nameof(level1)); }
+            if (level2 == null) { throw new ArgumentNullException(nameof(level2)); }
 
             return level1.Ordinal <= level2.Ordinal;
         }
@@ -280,7 +280,7 @@ namespace NLog
         {
             if (levelName == null)
             {
-                throw new ArgumentNullException("levelName");
+                throw new ArgumentNullException(nameof(levelName));
             }
 
             if (levelName.Equals("Trace", StringComparison.OrdinalIgnoreCase))
@@ -318,7 +318,7 @@ namespace NLog
                 return Off;
             }
 
-            throw new ArgumentException("Unknown log level: " + levelName);
+            throw new ArgumentException($"Unknown log level: {levelName}");
         }
 
         /// <summary>
@@ -385,7 +385,7 @@ namespace NLog
         {
             if (obj == null)
             {
-                throw new ArgumentNullException("obj");
+                throw new ArgumentNullException(nameof(obj));
             }
 
             // The code below does NOT account if the casting to LogLevel returns null. This is 
@@ -395,5 +395,97 @@ namespace NLog
             LogLevel level = (LogLevel)obj;
             return Ordinal - level.Ordinal;
         }
+
+        #region Implementation of IConvertible
+
+        TypeCode IConvertible.GetTypeCode()
+        {
+            return TypeCode.Object;
+        }
+
+        byte IConvertible.ToByte(IFormatProvider provider)
+        {
+            return Convert.ToByte(_ordinal);
+        }
+
+        bool IConvertible.ToBoolean(IFormatProvider provider)
+        {
+            throw new InvalidCastException();
+        }
+
+        char IConvertible.ToChar(IFormatProvider provider)
+        {
+            return Convert.ToChar(_ordinal);
+        }
+
+        DateTime IConvertible.ToDateTime(IFormatProvider provider)
+        {
+            throw new InvalidCastException();
+        }
+
+        decimal IConvertible.ToDecimal(IFormatProvider provider)
+        {
+            return Convert.ToDecimal(_ordinal);
+        }
+
+        double IConvertible.ToDouble(IFormatProvider provider)
+        {
+            return _ordinal;
+        }
+
+        short IConvertible.ToInt16(IFormatProvider provider)
+        {
+            return Convert.ToInt16(_ordinal);
+        }
+
+        int IConvertible.ToInt32(IFormatProvider provider)
+        {
+            return Convert.ToInt32(_ordinal);
+        }
+
+        long IConvertible.ToInt64(IFormatProvider provider)
+        {
+            return Convert.ToInt64(_ordinal);
+        }
+
+        sbyte IConvertible.ToSByte(IFormatProvider provider)
+        {
+            return Convert.ToSByte(_ordinal);
+        }
+
+        float IConvertible.ToSingle(IFormatProvider provider)
+        {
+            return Convert.ToSingle(_ordinal);
+        }
+
+        string IConvertible.ToString(IFormatProvider provider)
+        {
+            return _name;
+        }
+
+        object IConvertible.ToType(Type conversionType, IFormatProvider provider)
+        {
+            if (conversionType == typeof(string))
+                return Name;
+            else
+                return Convert.ChangeType(_ordinal, conversionType, provider);
+        }
+
+        ushort IConvertible.ToUInt16(IFormatProvider provider)
+        {
+            return Convert.ToUInt16(_ordinal);
+        }
+
+        uint IConvertible.ToUInt32(IFormatProvider provider)
+        {
+            return Convert.ToUInt32(_ordinal);
+        }
+
+        ulong IConvertible.ToUInt64(IFormatProvider provider)
+        {
+            return Convert.ToUInt64(_ordinal);
+        }
+
+        #endregion
     }
 }

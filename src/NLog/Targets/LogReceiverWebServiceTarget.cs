@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !__IOS__ && !WINDOWS_PHONE && !__ANDROID__ && !NETSTANDARD
+#if !__IOS__ && !WINDOWS_PHONE && !__ANDROID__ && !NETSTANDARD || WCF_SUPPORTED
+
 namespace NLog.Targets
 {
     using System;
@@ -47,11 +48,11 @@ namespace NLog.Targets
     using System.Windows;
     using System.Windows.Threading;
 #endif
-    using Common;
-    using Config;
-    using Internal;
-    using Layouts;
-    using LogReceiverService;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Layouts;
+    using NLog.LogReceiverService;
 
     /// <summary>
     /// Sends log messages to a NLog Receiver Service (using WCF or Web Services).
@@ -202,14 +203,24 @@ namespace NLog.Targets
             SendBufferedEvents(asyncContinuation);
         }
 
+        /// <summary>
+        /// Add value to the <see cref="NLogEvents.Strings"/>, returns ordinal in <see cref="NLogEvents.Strings"/>
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="stringTable">lookup so only unique items will be added to <see cref="NLogEvents.Strings"/></param>
+        /// <param name="value">value to add</param>
+        /// <returns></returns>
         private static int AddValueAndGetStringOrdinal(NLogEvents context, Dictionary<string, int> stringTable, string value)
         {
-            int stringIndex;
 
-            if (!stringTable.TryGetValue(value, out stringIndex))
+            if (value == null || !stringTable.TryGetValue(value, out var stringIndex))
             {
                 stringIndex = context.Strings.Count;
-                stringTable.Add(value, stringIndex);
+                if (value != null)
+                {
+					//don't add null to the string table, that would crash
+                    stringTable.Add(value, stringIndex);
+                }
                 context.Strings.Add(value);
             }
 
@@ -220,7 +231,7 @@ namespace NLog.Targets
         {
             if (logEvents.Count == 0 && !LogManager.ThrowExceptions)
             {
-                InternalLogger.Error("LogEvents array is empty, sending empty event...");
+                InternalLogger.Error("LogReceiverServiceTarget(Name={0}): LogEvents array is empty, sending empty event...", Name);
                 return new NLogEvents();
             }
 
@@ -247,27 +258,7 @@ namespace NLog.Targets
 
             if (IncludeEventProperties)
             {
-                for (int i = 0; i < logEvents.Count; ++i)
-                {
-                    var ev = logEvents[i].LogEvent;
-                    MergeEventProperties(ev);
-
-                    if (ev.HasProperties)
-                    {
-                        // add all event-level property names in 'LayoutNames' collection.
-                        foreach (var prop in ev.Properties)
-                        {
-                            string propName = prop.Key as string;
-                            if (propName != null)
-                            {
-                                if (!networkLogEvents.LayoutNames.Contains(propName))
-                                {
-                                    networkLogEvents.LayoutNames.Add(propName);
-                                }
-                            }
-                        }
-                    }
-                }
+                AddEventProperties(logEvents, networkLogEvents);
             }
 
             networkLogEvents.Events = new NLogEvent[logEvents.Count];
@@ -278,6 +269,26 @@ namespace NLog.Targets
             }
 
             return networkLogEvents;
+        }
+
+        private static void AddEventProperties(IList<AsyncLogEventInfo> logEvents, NLogEvents networkLogEvents)
+        {
+            for (int i = 0; i < logEvents.Count; ++i)
+            {
+                var ev = logEvents[i].LogEvent;
+
+                if (ev.HasProperties)
+                {
+                    // add all event-level property names in 'LayoutNames' collection.
+                    foreach (var prop in ev.Properties)
+                    {
+                        if (prop.Key is string propName && !networkLogEvents.LayoutNames.Contains(propName))
+                        {
+                            networkLogEvents.LayoutNames.Add(propName);
+                        }
+                    }
+                }
+            }
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Client is disposed asynchronously.")]
@@ -296,7 +307,7 @@ namespace NLog.Targets
             client.ProcessLogMessagesCompleted += (sender, e) =>
             {
                 if (e.Error != null)
-                    InternalLogger.Error(e.Error, "Error in send for LogReceiver: {0}", Name);
+                    InternalLogger.Error(e.Error, "LogReceiverServiceTarget(Name={0}): Error while sending", Name);
 
                 // report error to the callers
                 for (int i = 0; i < asyncContinuations.Count; ++i)
@@ -339,7 +350,7 @@ namespace NLog.Targets
                         }
                         catch (Exception ex)
                         {
-                            InternalLogger.Error(ex, "Error in send for LogReceiver: {0}", this.Name);
+                            InternalLogger.Error(ex, "LogReceiverServiceTarget(Name={0}): Error while sending", Name);
                             if (ex.MustBeRethrownImmediately())
                             {
                                 throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
@@ -410,7 +421,7 @@ namespace NLog.Targets
         /// service configuration - binding and endpoint address
         /// </summary>
         /// <returns></returns>
-        /// <remarks>virtual is used by endusers</remarks>
+        /// <remarks>virtual is used by end users</remarks>
         protected virtual IWcfLogReceiverClient CreateLogReceiver()
         {
 #pragma warning disable 612, 618
@@ -464,24 +475,27 @@ namespace NLog.Targets
             {
                 if (flushContinuation != null)
                 {
-                    InternalLogger.Error(exception, "Error in flush async for LogReceiver: {0}", Name);
+                    InternalLogger.Error(exception, "LogReceiverServiceTarget(Name={0}): Error in flush async", Name);
+#if !NETSTANDARD
                     if (exception.MustBeRethrown())
                         throw;
-
+#endif
                     flushContinuation(exception);
                 }
                 else
                 {
-                    InternalLogger.Error(exception, "Error in send async for LogReceiver: {0}", Name);
+                    InternalLogger.Error(exception, "LogReceiverServiceTarget(Name={0}): Error in send async", Name);
+#if !NETSTANDARD
                     if (exception.MustBeRethrownImmediately())
                     {
                         throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
                     }
+#endif
                 }
             }
         }
 
-        private NLogEvent TranslateEvent(LogEventInfo eventInfo, NLogEvents context, Dictionary<string, int> stringTable)
+        internal NLogEvent TranslateEvent(LogEventInfo eventInfo, NLogEvents context, Dictionary<string, int> stringTable)
         {
             var nlogEvent = new NLogEvent();
             nlogEvent.Id = eventInfo.SequenceID;

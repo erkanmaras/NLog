@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -63,7 +63,7 @@ namespace NLog.MessageTemplates
 
         /// <summary>
         /// Parameter method that should be used to render the parameter
-        /// See also <see cref="IValueSerializer"/>
+        /// See also <see cref="IValueFormatter"/>
         /// </summary>
         public CaptureType CaptureType { get; }
 
@@ -87,11 +87,9 @@ namespace NLog.MessageTemplates
                     case "8": return 8;
                     case "9": return 9;
                     default:
-                        if (Name?.Length >= 1 && Name[0] >= '0' && Name[0] <= '9')
+                        if (Name?.Length >= 1 && Name[0] >= '0' && Name[0] <= '9' && int.TryParse(Name, out var parameterIndex))
                         {
-                            int parameterIndex;
-                            if (int.TryParse(Name, out parameterIndex))
-                                return parameterIndex;
+                            return parameterIndex;
                         }
                         return null;
                 }
@@ -104,7 +102,7 @@ namespace NLog.MessageTemplates
         /// <param name="name">Parameter Name</param>
         /// <param name="value">Parameter Value</param>
         /// <param name="format">Parameter Format</param>
-        public MessageTemplateParameter([NotNull] string name, object value, string format)
+        internal MessageTemplateParameter([NotNull] string name, object value, string format)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Value = value;

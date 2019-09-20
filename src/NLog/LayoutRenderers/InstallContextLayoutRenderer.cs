@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,12 +36,14 @@ namespace NLog.LayoutRenderers
     using System;
     using System.Globalization;
     using System.Text;
-    using Config;
+    using NLog.Config;
+	using NLog.Internal;
 
     /// <summary>
     /// Installation parameter (passed to InstallNLogConfig).
     /// </summary>
     [LayoutRenderer("install-context")]
+    [ThreadSafe]
     public class InstallContextLayoutRenderer : LayoutRenderer
     {
         /// <summary>
@@ -59,13 +61,17 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            object value;
-
-            if (logEvent.Properties.TryGetValue(Parameter, out value))
+            var value = GetValue(logEvent);
+            if (value != null)
             {
                 var formatProvider = GetFormatProvider(logEvent);
                 builder.Append(Convert.ToString(value, formatProvider));
             }
+        }
+
+        private object GetValue(LogEventInfo logEvent)
+        {
+            return !logEvent.Properties.TryGetValue(Parameter, out var value) ? null : value;
         }
     }
 }

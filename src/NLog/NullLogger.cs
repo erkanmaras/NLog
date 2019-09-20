@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,11 +31,11 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-
 namespace NLog
 {
     using Internal;
     using System;
+    using System.Diagnostics.CodeAnalysis;
 
     /// <summary>
     /// It works as a normal <see cref="T:NLog.Logger" /> but it discards all messages which an application requests 
@@ -45,9 +45,6 @@ namespace NLog
     /// </summary>
     public sealed class NullLogger : Logger
     {
-        // Hides the default constructor of this class.
-        private NullLogger() { }
-
         /// <summary>
         /// Initializes a new instance of <see cref="NullLogger"/>.
         /// </summary>
@@ -56,7 +53,7 @@ namespace NLog
         {
             if (factory == null)
             {
-                throw new ArgumentNullException("factory");
+                throw new ArgumentNullException(nameof(factory));
             }
 
             TargetWithFilterChain[] targetsByLevel = new TargetWithFilterChain[LogLevel.MaxLevel.Ordinal + 1];

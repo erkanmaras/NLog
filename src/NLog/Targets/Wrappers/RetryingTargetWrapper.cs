@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,8 +37,8 @@ namespace NLog.Targets.Wrappers
     using System.Collections.Generic;
     using System.ComponentModel;
     using System.Threading;
-    using Common;
-    using Internal;
+    using NLog.Common;
+    using NLog.Internal;
 
     /// <summary>
     /// Retries in case of write error.
@@ -93,7 +93,7 @@ namespace NLog.Targets.Wrappers
             WrappedTarget = wrappedTarget;
             RetryCount = retryCount;
             RetryDelayMilliseconds = retryDelayMilliseconds;
-            OptimizeBufferReuse = GetType() == typeof(RetryingTargetWrapper);
+            OptimizeBufferReuse = GetType() == typeof(RetryingTargetWrapper);   // Class not sealed, reduce breaking changes
         }
 
         /// <summary>
@@ -164,7 +164,7 @@ namespace NLog.Targets.Wrappers
                 }
 
                 int retryNumber = Interlocked.Increment(ref counter);
-                InternalLogger.Warn("Error while writing to '{0}': {1}. Try {2}/{3}", WrappedTarget, ex, retryNumber, RetryCount);
+                InternalLogger.Warn(ex, "RetryingWrapper(Name={0}): Error while writing to '{1}'. Try {2}/{3}", Name, WrappedTarget, retryNumber, RetryCount);
 
                 // exceeded retry count
                 if (retryNumber >= RetryCount)
@@ -178,11 +178,11 @@ namespace NLog.Targets.Wrappers
                 for (int i = 0; i < RetryDelayMilliseconds;)
                 {
                     int retryDelay = Math.Min(100, RetryDelayMilliseconds - i);
-                    Thread.Sleep(retryDelay);
+                    AsyncHelpers.WaitForDelay(TimeSpan.FromMilliseconds(retryDelay));
                     i += retryDelay;
                     if (!IsInitialized)
                     {
-                        InternalLogger.Warn("Target closed. Aborting.");
+                        InternalLogger.Warn("RetryingWrapper(Name={0}): Target closed. Aborting.", Name);
                         logEvent.Continuation(ex);
                         return;
                     }

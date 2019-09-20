@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,13 +31,13 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using NLog.Layouts;
-
 namespace NLog.LayoutRenderers.Wrappers
 {
-    using Config;
     using System;
     using System.ComponentModel;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Layouts;
 
     /// <summary>
     /// Applies caching to another layout output.
@@ -47,9 +47,9 @@ namespace NLog.LayoutRenderers.Wrappers
     /// </remarks>
     [LayoutRenderer("cached")]
     [AmbientProperty("Cached")]
-    [AmbientProperty("ClearCache")] 
+    [AmbientProperty("ClearCache")]
     [ThreadAgnostic]
-    public sealed class CachedLayoutRendererWrapper : WrapperLayoutRendererBase
+    public sealed class CachedLayoutRendererWrapper : WrapperLayoutRendererBase, IStringValueRenderer
     {
         /// <summary>
         /// A value indicating when the cache is cleared.
@@ -65,8 +65,8 @@ namespace NLog.LayoutRenderers.Wrappers
             OnClose = 2
         }
 
-        private string _cachedValue = null;
-        private string _renderedCacheKey = null;
+        private string _cachedValue;
+        private string _renderedCacheKey;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="CachedLayoutRendererWrapper"/> class.
@@ -87,11 +87,13 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <summary>
         /// Gets or sets a value indicating when the cache is cleared.
         /// </summary>
+        /// <docgen category='Caching Options' order='10' />
         public ClearCacheOption ClearCache { get; set; }
 
         /// <summary>
         /// Cachekey. If the cachekey changes, resets the value. For example, the cachekey would be the current day.s
         /// </summary>
+        /// <docgen category='Caching Options' order='10' />
         public Layout CacheKey { get; set; }
 
         /// <summary>
@@ -133,7 +135,7 @@ namespace NLog.LayoutRenderers.Wrappers
         {
             if (Cached)
             {
-                var newCacheKey = CacheKey == null ? null: CacheKey.Render(logEvent);
+                var newCacheKey = CacheKey?.Render(logEvent);
                 if (_cachedValue == null || _renderedCacheKey != newCacheKey)
                 {
                     _cachedValue = base.RenderInner(logEvent);
@@ -147,5 +149,8 @@ namespace NLog.LayoutRenderers.Wrappers
                 return base.RenderInner(logEvent);
             }
         }
+
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => Cached ? RenderInner(logEvent) : null;
     }
 }

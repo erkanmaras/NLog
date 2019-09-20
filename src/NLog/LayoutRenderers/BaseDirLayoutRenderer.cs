@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,9 +36,9 @@ namespace NLog.LayoutRenderers
     using System;
     using System.IO;
     using System.Text;
-    using Internal.Fakeables;
-    using Config;
-    using Internal;
+    using NLog.Internal.Fakeables;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The current application domain's base directory.
@@ -46,11 +46,12 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("basedir")]
     [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public class BaseDirLayoutRenderer : LayoutRenderer
     {
-        private string _baseDir;
+        private readonly string _baseDir;
 
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !NETSTANDARD1_3
 
         /// <summary>
         /// cached
@@ -60,6 +61,7 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// Use base dir of current process.
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         public bool ProcessDir { get; set; }
 
 #endif
@@ -100,10 +102,10 @@ namespace NLog.LayoutRenderers
         {
 
             var dir = _baseDir;
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !NETSTANDARD1_3
             if (ProcessDir)
             {
-                dir = _processDir ?? (_processDir = Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName));
+                dir = _processDir ?? (_processDir = Path.GetDirectoryName(ProcessIDHelper.Instance.CurrentProcessFilePath));
             }
 #endif
 

@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
 
 namespace NLog.Internal
 {
@@ -57,11 +57,6 @@ namespace NLog.Internal
             return false;
         }
 
-        public static bool IsAssignableFrom(this Type type, Type other)
-        {
-            return type.GetTypeInfo().IsAssignableFrom(other);
-        }
-
         public static bool IsDefined(this Type type, Type other, bool inherit)
         {
             return type.GetTypeInfo().IsDefined(other, inherit);
@@ -72,44 +67,39 @@ namespace NLog.Internal
             return type.GetTypeInfo().IsSubclassOf(other);
         }
 
-        public static MethodInfo GetMethod(this Type type, string name)
+        public static MethodInfo GetMethod(this Type type, string name, BindingFlags bindingAttr, object binder, Type[] types, object[] modifiers)
         {
-            return type.GetTypeInfo().GetMethod(name);
-        }
+            if (binder != null)
+                throw new ArgumentException("Not supported", nameof(binder));
+            if (modifiers != null)
+                throw new ArgumentException("Not supported", nameof(modifiers));
 
-        public static MethodInfo GetMethod(this Type type, string name, BindingFlags bindingAttr)
-        {
-            return type.GetTypeInfo().GetMethod(name, bindingAttr);
-        }
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static);
+            foreach (MethodInfo method in methods)
+            {
+                if (method.Name != name)
+                    continue;
 
-        public static PropertyInfo GetProperty(this Type type, string name)
-        {
-            return type.GetTypeInfo().GetProperty(name);
-        }
+                var parameters = method.GetParameters();
+                if (parameters == null || parameters.Length != types.Length)
+                    continue;
 
-        public static PropertyInfo GetProperty(this Type type, string name, BindingFlags bindingAttr)
-        {
-            return type.GetTypeInfo().GetProperty(name, bindingAttr);
-        }
+                for (int i = 0; i < parameters.Length; ++i)
+                {
+                    if (parameters[i].ParameterType != types[i])
+                    {
+                        parameters = null;
+                        break;
+                    }
+                }
 
-        public static FieldInfo GetField(this Type type, string name, BindingFlags bindingAttr)
-        {
-            return type.GetTypeInfo().GetField(name, bindingAttr);
-        }
+                if (parameters != null)
+                {
+                    return method;
+                }
+            }
 
-        public static MethodInfo[] GetMethods(this Type type)
-        {
-            return type.GetTypeInfo().GetMethods();
-        }
-
-        public static PropertyInfo[] GetProperties(this Type type, BindingFlags bindingAttr)
-        {
-            return type.GetTypeInfo().GetProperties(bindingAttr);
-        }
-
-        public static Type[] GetGenericArguments(this Type type)
-        {
-            return type.GetTypeInfo().GetGenericArguments();
+            return null;
         }
 
         public static byte[] GetBuffer(this MemoryStream memoryStream)

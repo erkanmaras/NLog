@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -52,7 +52,9 @@ namespace NLog.UnitTests.Internal
         [InlineData(typeof(NLogConfigurationException), false)]
         [InlineData(typeof(Exception), false)]
         [InlineData(typeof(ArgumentException), false)]
+#if !DEBUG
         [InlineData(typeof(NullReferenceException), false)]
+#endif
         [InlineData(typeof(OutOfMemoryException), true)]
         public void TestMustBeRethrowImmediately(Type t, bool result)
         {
@@ -85,8 +87,10 @@ namespace NLog.UnitTests.Internal
         [InlineData(typeof(ArgumentException), true, true, false)]
         [InlineData(typeof(ArgumentException), true, true, true)]
         [InlineData(typeof(ArgumentException), true, true, null)]
+#if !DEBUG
         [InlineData(typeof(NullReferenceException), false, false, false)]
         [InlineData(typeof(NullReferenceException), true, true, false)]
+#endif
         [InlineData(typeof(OutOfMemoryException), true, false, false)]
         [InlineData(typeof(OutOfMemoryException), true, true, false)]
         public void MustBeRethrown(Type exceptionType, bool result, bool throwExceptions, bool? throwConfigException)
@@ -96,8 +100,6 @@ namespace NLog.UnitTests.Internal
 
             var ex = CreateException(exceptionType);
             Assert.Equal(result, ex.MustBeRethrown());
-
-
         }
 
         [Theory]

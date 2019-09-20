@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,40 +34,108 @@
 namespace NLog.Internal
 {
     using System;
-    using Config;
     using System.Diagnostics;
     using System.Reflection;
     using System.Runtime.CompilerServices;
+    using NLog.Config;
 
     /// <summary>
     /// Utilities for dealing with <see cref="StackTraceUsage"/> values.
     /// </summary>
     internal static class StackTraceUsageUtils
     {
+        private static readonly Assembly nlogAssembly = typeof(StackTraceUsageUtils).GetAssembly();
+        private static readonly Assembly mscorlibAssembly = typeof(string).GetAssembly();
+        private static readonly Assembly systemAssembly = typeof(Debug).GetAssembly();
+
         internal static StackTraceUsage Max(StackTraceUsage u1, StackTraceUsage u2)
         {
             return (StackTraceUsage)Math.Max((int)u1, (int)u2);
         }
 
-#if !NETSTANDARD1_5
-        /// <summary>
-        /// Get this stacktrace for inline unit test
-        /// </summary>
-        /// <param name="loggerType"></param>
-        /// <returns></returns>
-        internal static StackTrace GetWriteStackTrace(Type loggerType)
-        {
-            return new StackTrace();
-        }
-#endif
-
         public static int GetFrameCount(this StackTrace strackTrace)
         {
-#if !NETSTANDARD1_5
+#if !NETSTANDARD1_0
             return strackTrace.FrameCount;
 #else
             return strackTrace.GetFrames().Length;
 #endif
+        }
+
+        public static string GetStackFrameMethodName(MethodBase method, bool includeMethodInfo, bool cleanAsyncMoveNext, bool cleanAnonymousDelegates)
+        {
+            if (method == null)
+                return null;
+
+            string methodName = method.Name;
+
+            var callerClassType = method.DeclaringType;
+            if (cleanAsyncMoveNext && methodName == "MoveNext" && callerClassType?.DeclaringType != null && callerClassType.Name.StartsWith("<"))
+            {
+                // NLog.UnitTests.LayoutRenderers.CallSiteTests+<CleanNamesOfAsyncContinuations>d_3'1.MoveNext
+                int endIndex = callerClassType.Name.IndexOf('>', 1);
+                if (endIndex > 1)
+                {
+                    methodName = callerClassType.Name.Substring(1, endIndex - 1);
+                }
+            }
+
+            // Clean up the function name if it is an anonymous delegate
+            // <.ctor>b__0
+            // <Main>b__2
+            if (cleanAnonymousDelegates && (methodName.StartsWith("<") && methodName.Contains("__") && methodName.Contains(">")))
+            {
+                int startIndex = methodName.IndexOf('<') + 1;
+                int endIndex = methodName.IndexOf('>');
+
+                methodName = methodName.Substring(startIndex, endIndex - startIndex);
+            }
+
+            if (includeMethodInfo && methodName == method.Name)
+            {
+                methodName = method.ToString();
+            }
+
+            return methodName;
+        }
+
+        public static string GetStackFrameMethodClassName(MethodBase method, bool includeNameSpace, bool cleanAsyncMoveNext, bool cleanAnonymousDelegates)
+        {
+            if (method == null)
+                return null;
+
+            var callerClassType = method.DeclaringType;
+            if (cleanAsyncMoveNext && method.Name == "MoveNext" && callerClassType?.DeclaringType != null && callerClassType.Name.StartsWith("<"))
+            {
+                // NLog.UnitTests.LayoutRenderers.CallSiteTests+<CleanNamesOfAsyncContinuations>d_3'1
+                int endIndex = callerClassType.Name.IndexOf('>', 1);
+                if (endIndex > 1)
+                {
+                    callerClassType = callerClassType.DeclaringType;
+                }
+            }
+
+            if (!includeNameSpace
+                && callerClassType?.DeclaringType != null
+                && callerClassType.IsNested
+                && callerClassType.GetCustomAttribute<CompilerGeneratedAttribute>() != null)
+            {
+                return callerClassType.DeclaringType.Name;
+            }
+
+            string className = includeNameSpace ? callerClassType?.FullName : callerClassType?.Name;
+
+            if (cleanAnonymousDelegates && className != null)
+            {
+                // NLog.UnitTests.LayoutRenderers.CallSiteTests+<>c__DisplayClassa
+                int index = className.IndexOf("+<>", StringComparison.Ordinal);
+                if (index >= 0)
+                {
+                    className = className.Substring(0, index);
+                }
+            }
+
+            return className;
         }
 
         /// <summary>
@@ -80,30 +148,15 @@ namespace NLog.Internal
             int framesToSkip = 2;
 
             string className = string.Empty;
-#if !NETSTANDARD1_5
-            Type declaringType;
-
-            do
-            {
 #if SILVERLIGHT
-                StackFrame frame = new StackTrace().GetFrame(framesToSkip);
-#else
-                StackFrame frame = new StackFrame(framesToSkip, false);
-#endif
-                MethodBase method = frame.GetMethod();
-                declaringType = method.DeclaringType;
-                if (declaringType == null)
-                {
-                    className = method.Name;
-                    break;
-                }
-
-                framesToSkip++;
-                className = declaringType.FullName;
-            } while (className.StartsWith("System.", StringComparison.Ordinal));
+            var stackFrame = new StackFrame(framesToSkip);
+            className = GetClassFullName(stackFrame);
+#elif !NETSTANDARD1_0
+            var stackFrame = new StackFrame(framesToSkip, false);
+            className = GetClassFullName(stackFrame);
 #else
             var stackTrace = Environment.StackTrace;
-            var stackTraceLines = stackTrace.Replace("\r", "").Split(new[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            var stackTraceLines = stackTrace.Replace("\r", "").SplitAndTrimTokens('\n');
             for (int i = 0; i < stackTraceLines.Length; ++i)
             {
                 var callingClassAndMethod = stackTraceLines[i].Split(new[] { " ", "<>", "(", ")" }, StringSplitOptions.RemoveEmptyEntries)[1];
@@ -126,6 +179,94 @@ namespace NLog.Internal
             }
 #endif
             return className;
+        }
+
+#if !NETSTANDARD1_0
+        /// <summary>
+        /// Gets the fully qualified name of the class invoking the calling method, including the 
+        /// namespace but not the assembly.    
+        /// </summary>
+        /// <param name="stackFrame">StackFrame from the calling method</param>
+        /// <returns>Fully qualified class name</returns>
+        public static string GetClassFullName(StackFrame stackFrame)
+        {
+            string className = LookupClassNameFromStackFrame(stackFrame);
+            if (string.IsNullOrEmpty(className))
+            {
+#if SILVERLIGHT
+                var stackTrace = new StackTrace();
+#else
+                var stackTrace = new StackTrace(false);
+#endif
+                className = GetClassFullName(stackTrace);
+            }
+            return className;
+        }
+#endif
+
+        private static string GetClassFullName(StackTrace stackTrace)
+        {
+            foreach (StackFrame frame in stackTrace.GetFrames())
+            {
+                string className = LookupClassNameFromStackFrame(frame);
+                if (!string.IsNullOrEmpty(className))
+                {
+                    return className;
+                }
+            }
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// Returns the assembly from the provided StackFrame (If not internal assembly)
+        /// </summary>
+        /// <returns>Valid assembly, or null if assembly was internal</returns>
+        public static Assembly LookupAssemblyFromStackFrame(StackFrame stackFrame)
+        {
+            var method = stackFrame.GetMethod();
+            if (method == null)
+            {
+                return null;
+            }
+
+            var assembly = method.DeclaringType?.GetAssembly() ?? method.Module?.Assembly;
+            // skip stack frame if the method declaring type assembly is from hidden assemblies list
+            if (assembly == nlogAssembly)
+            {
+                return null;
+            }
+
+            if (assembly == mscorlibAssembly)
+            {
+                return null;
+            }
+
+            if (assembly == systemAssembly)
+            {
+                return null;
+            }
+
+            return assembly;
+        }
+
+        /// <summary>
+        /// Returns the classname from the provided StackFrame (If not from internal assembly)
+        /// </summary>
+        /// <param name="stackFrame"></param>
+        /// <returns>Valid class name, or empty string if assembly was internal</returns>
+        public static string LookupClassNameFromStackFrame(StackFrame stackFrame)
+        {
+            var method = stackFrame.GetMethod();
+            if (method != null && LookupAssemblyFromStackFrame(stackFrame) != null)
+            {
+                string className = GetStackFrameMethodClassName(method, true, true, true) ?? method.Name;
+                if (!string.IsNullOrEmpty(className) && !className.StartsWith("System.", StringComparison.Ordinal))
+                {
+                    return className;
+                }
+            }
+
+            return string.Empty;
         }
     }
 }

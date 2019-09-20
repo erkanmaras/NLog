@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,9 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System;
+using NLog.Config;
+
 namespace NLog.UnitTests.LayoutRenderers
 {
     using Xunit;
@@ -40,7 +43,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void LogLevelTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${level} ${message}' /></targets>
                 <rules>
@@ -64,7 +67,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void LogLevelSingleCharacterTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${level:format=FirstCharacter} ${message}' /></targets>
                 <rules>
@@ -90,7 +93,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void LogLevelOrdinalTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${level:format=Ordinal} ${message}' /></targets>
                 <rules>
@@ -111,6 +114,42 @@ namespace NLog.UnitTests.LayoutRenderers
             AssertDebugLastMessage("debug", "4 a");
             logger.Fatal("a");
             AssertDebugLastMessage("debug", "5 a");
+        }
+
+        [Fact]
+        public void LogLevelGetTypeCodeTest()
+        {
+            // Arrange
+            var logLevel = LogLevel.Info;
+
+            // Act
+            var result = Convert.GetTypeCode(logLevel);
+
+            // Assert
+            Assert.Equal(TypeCode.Object, result);
+        }
+
+        [Theory]
+        [InlineData(typeof(int), 2)]
+        [InlineData(typeof(uint), (uint)2)]
+        [InlineData(typeof(string), "Info")]
+        public void LogLevelConvertTest(Type type, object expected)
+        {
+            // Arrange
+            IConvertible logLevel = LogLevel.Info;
+            var logConverter = System.ComponentModel.TypeDescriptor.GetConverter(typeof(LogLevel));
+                
+            // Act
+            var changeTypeResult = Convert.ChangeType(logLevel, type);
+            var changeToResult = logLevel.ToType(type, System.Globalization.CultureInfo.CurrentCulture);
+            var convertToResult = logConverter.CanConvertTo(type) ? logConverter.ConvertTo(logLevel, type) : null;
+            var convertFromResult = logConverter.CanConvertFrom(expected.GetType()) ? logConverter.ConvertFrom(expected) : null;
+
+            // Assert
+            Assert.Equal(expected, changeTypeResult);
+            Assert.Equal(expected, changeToResult);
+            Assert.Equal(expected, convertToResult);
+            Assert.Equal(logLevel, convertFromResult);
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,11 +31,14 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System;
+
 namespace NLog.LayoutRenderers.Wrappers
 {
     using System.Text;
-    using Config;
-    using Layouts;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Layouts;
 
     /// <summary>
     /// Base class for <see cref="LayoutRenderer"/>s which wrapping other <see cref="LayoutRenderer"/>s. 
@@ -48,6 +51,8 @@ namespace NLog.LayoutRenderers.Wrappers
     /// </example>
     public abstract class WrapperLayoutRendererBase : LayoutRenderer
     {
+        private Layout _inner;
+
         /// <summary>
         /// Gets or sets the wrapped layout.
         /// 
@@ -55,7 +60,31 @@ namespace NLog.LayoutRenderers.Wrappers
         /// </summary>
         /// <docgen category='Transformation Options' order='10' />
         [DefaultParameter]
-        public Layout Inner { get; set; }
+        public Layout Inner
+        {
+            get => _inner;
+            set
+            {
+                var changed = !ReferenceEquals(_inner, value);
+                _inner = value;
+
+                if (changed)
+                    InnerChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Notify when <see cref="Inner"/> has been changed
+        /// </summary>
+        /// <remarks>Change to private protected in C# 7.3</remarks>
+        internal event EventHandler InnerChanged;
+
+        /// <inheritdoc/>
+        protected override void InitializeLayoutRenderer()
+        {
+            base.InitializeLayoutRenderer();
+            Inner?.Initialize(LoggingConfiguration);
+        }
 
         /// <summary>
         /// Renders the inner message, processes it and appends it to the specified <see cref="StringBuilder" />.
@@ -63,6 +92,32 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            if (Inner == null)
+            {
+                InternalLogger.Warn("{0} has no configured Inner-Layout, so skipping", this);
+                return;
+            }
+
+            int orgLength = builder.Length;
+            try
+            {
+                RenderInnerAndTransform(logEvent, builder, orgLength);
+            }
+            catch
+            {
+                builder.Length = orgLength; // Rewind/Truncate on exception
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Appends the rendered output from <see cref="Inner"/>-layout and transforms the added output (when necessary)
+        /// </summary>
+        /// <param name="logEvent">Logging event.</param>
+        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
+        /// <param name="orgLength">Start position for any necessary transformation of <see cref="StringBuilder"/>.</param>
+        protected virtual void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
             string msg = RenderInner(logEvent);
             builder.Append(Transform(logEvent, msg));
@@ -93,7 +148,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <returns>Contents of inner layout.</returns>
         protected virtual string RenderInner(LogEventInfo logEvent)
         {
-            return Inner.Render(logEvent);
+            return Inner?.Render(logEvent) ?? string.Empty;
         }
     }
 }

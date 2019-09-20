@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,7 +38,7 @@ namespace NLog.Internal.NetworkSenders
     using System.Net;
     using System.Net.Sockets;
     using System.Threading;
-    using Common;
+    using NLog.Common;
 
     /// <summary>
     /// A base class for all network senders. Supports one-way sending of messages
@@ -170,7 +170,7 @@ namespace NLog.Internal.NetworkSenders
 
                 default:
                     {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
                         var addresses = Dns.GetHostAddressesAsync(uri.Host).Result;
 #else
                         var addresses = Dns.GetHostEntry(uri.Host).AddressList;
@@ -183,7 +183,7 @@ namespace NLog.Internal.NetworkSenders
                             }
                         }
 
-                        throw new IOException("Cannot resolve '" + uri.Host + "' to an address in '" + addressFamily + "'");
+                        throw new IOException($"Cannot resolve '{uri.Host}' to an address in '{addressFamily}'");
                     }
             }
 #endif

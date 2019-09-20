@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -346,6 +346,45 @@ Dispose()
         }
 
         [Fact]
+        public void InstallParameterTest()
+        {
+            MockDbConnection.ClearLog();
+
+            DatabaseCommandInfo installDbCommand = new DatabaseCommandInfo
+            {
+                Text = $"INSERT INTO dbo.SomeTable(SomeColumn) SELECT @paramOne WHERE NOT EXISTS(SELECT 1 FROM dbo.SomeOtherTable WHERE SomeColumn = @paramOne);"
+            };
+            installDbCommand.Parameters.Add(new DatabaseParameterInfo("paramOne", "SomeValue"));
+
+            DatabaseTarget dt = new DatabaseTarget()
+            {
+                DBProvider = typeof(MockDbConnection).AssemblyQualifiedName,
+                KeepConnection = true,
+                CommandText = "not_important"
+            };
+            dt.InstallDdlCommands.Add(installDbCommand);
+
+            dt.Initialize(null);
+
+            Assert.Same(typeof(MockDbConnection), dt.ConnectionType);
+
+            dt.Install(new InstallationContext());
+
+            string expectedLog = @"Open('Server=.;Trusted_Connection=SSPI;').
+CreateParameter(0)
+Parameter #0 Direction=Input
+Parameter #0 Name=paramOne
+Parameter #0 Value=""SomeValue""
+Add Parameter Parameter #0
+ExecuteNonQuery: INSERT INTO dbo.SomeTable(SomeColumn) SELECT @paramOne WHERE NOT EXISTS(SELECT 1 FROM dbo.SomeOtherTable WHERE SomeColumn = @paramOne);
+Close()
+Dispose()
+";
+
+            AssertLog(expectedLog);
+        }
+
+        [Fact]
         public void ParameterTest()
         {
             MockDbConnection.ClearLog();
@@ -390,33 +429,33 @@ Dispose()
 CreateParameter(0)
 Parameter #0 Direction=Input
 Parameter #0 Name=msg
-Parameter #0 Value=msg1
+Parameter #0 Value=""msg1""
 Add Parameter Parameter #0
 CreateParameter(1)
 Parameter #1 Direction=Input
 Parameter #1 Name=lvl
-Parameter #1 Value=Info
+Parameter #1 Value=""Info""
 Add Parameter Parameter #1
 CreateParameter(2)
 Parameter #2 Direction=Input
 Parameter #2 Name=lg
-Parameter #2 Value=MyLogger
+Parameter #2 Value=""MyLogger""
 Add Parameter Parameter #2
 ExecuteNonQuery: INSERT INTO FooBar VALUES(@msg, @lvl, @lg)
 CreateParameter(0)
 Parameter #0 Direction=Input
 Parameter #0 Name=msg
-Parameter #0 Value=msg3
+Parameter #0 Value=""msg3""
 Add Parameter Parameter #0
 CreateParameter(1)
 Parameter #1 Direction=Input
 Parameter #1 Name=lvl
-Parameter #1 Value=Debug
+Parameter #1 Value=""Debug""
 Add Parameter Parameter #1
 CreateParameter(2)
 Parameter #2 Direction=Input
 Parameter #2 Name=lg
-Parameter #2 Value=MyLogger2
+Parameter #2 Value=""MyLogger2""
 Add Parameter Parameter #2
 ExecuteNonQuery: INSERT INTO FooBar VALUES(@msg, @lvl, @lg)
 ";
@@ -432,9 +471,17 @@ Dispose()
             AssertLog(expectedLog);
         }
 
-        [Fact]
-        public void LevelParameterTest()
+        [Theory]
+        [InlineData(null, true, @"""2""")]
+        [InlineData(null, false, @"""2""")]
+        [InlineData(DbType.Int32, true, "2")]
+        [InlineData(DbType.Int32, false, "2")]
+        [InlineData(DbType.Object, true, @"""2""")]
+        [InlineData(DbType.Object, false, "Info")]
+        public void LevelParameterTest(DbType? dbType, bool noRawValue, string expectedValue)
         {
+            string lvlLayout = noRawValue ? "${level:format=Ordinal:norawvalue=true}" : "${level:format=Ordinal}";
+
             MockDbConnection.ClearLog();
             DatabaseTarget dt = new DatabaseTarget()
             {
@@ -443,7 +490,7 @@ Dispose()
                 KeepConnection = true,
                 Parameters =
                 {
-                    new DatabaseParameterInfo("lvl", "${level:format=Ordinal}"),
+                    new DatabaseParameterInfo("lvl", lvlLayout) { DbType = dbType?.ToString() },
                     new DatabaseParameterInfo("msg", "${message}")
                 }
             };
@@ -456,7 +503,6 @@ Dispose()
             var events = new[]
             {
                 new LogEventInfo(LogLevel.Info, "MyLogger", "msg1").WithContinuation(exceptions.Add),
-                new LogEventInfo(LogLevel.Debug, "MyLogger2", "msg3").WithContinuation(exceptions.Add),
             };
 
             dt.WriteAsyncLogEvents(events);
@@ -465,30 +511,19 @@ Dispose()
                 Assert.Null(ex);
             }
 
-            string expectedLog = @"Open('Server=.;Trusted_Connection=SSPI;').
+            string expectedLog = string.Format(@"Open('Server=.;Trusted_Connection=SSPI;').
 CreateParameter(0)
 Parameter #0 Direction=Input
-Parameter #0 Name=lvl
-Parameter #0 Value=2
+Parameter #0 Name=lvl{0}
+Parameter #0 Value={1}
 Add Parameter Parameter #0
 CreateParameter(1)
 Parameter #1 Direction=Input
 Parameter #1 Name=msg
-Parameter #1 Value=msg1
+Parameter #1 Value=""msg1""
 Add Parameter Parameter #1
 ExecuteNonQuery: INSERT INTO FooBar VALUES(@lvl, @msg)
-CreateParameter(0)
-Parameter #0 Direction=Input
-Parameter #0 Name=lvl
-Parameter #0 Value=1
-Add Parameter Parameter #0
-CreateParameter(1)
-Parameter #1 Direction=Input
-Parameter #1 Name=msg
-Parameter #1 Value=msg3
-Add Parameter Parameter #1
-ExecuteNonQuery: INSERT INTO FooBar VALUES(@lvl, @msg)
-";
+", dbType.HasValue ? $"\r\nParameter #0 DbType={dbType.Value}" : "", expectedValue);
 
             AssertLog(expectedLog);
 
@@ -499,6 +534,127 @@ Dispose()
 ";
 
             AssertLog(expectedLog);
+        }
+
+        [Theory]
+        [InlineData("${counter}", DbType.Int16, (short)1)]
+        [InlineData("${counter}", DbType.Int32, 1)]
+        [InlineData("${counter}", DbType.Int64, (long)1)]
+        [InlineData("${counter:norawvalue=true}", DbType.Int16, (short)1)] //fallback
+        [InlineData("${counter}", DbType.VarNumeric, 1, true)]
+        [InlineData("${counter}", DbType.AnsiString, "1")]
+        [InlineData("${level}", DbType.AnsiString, "Debug")]
+        [InlineData("${level}", DbType.Int32, 1)]
+        [InlineData("${level}", DbType.UInt16, (ushort)1)]
+        [InlineData("${event-properties:boolprop}", DbType.Boolean, true)]
+        [InlineData("${event-properties:intprop}", DbType.Int32, 123)]
+        [InlineData("${event-properties:intprop}", DbType.AnsiString, "123")]
+        [InlineData("${event-properties:intprop}", DbType.AnsiStringFixedLength, "123")]
+        [InlineData("${event-properties:intprop}", DbType.String, "123")]
+        [InlineData("${event-properties:intprop}", DbType.StringFixedLength, "123")]
+        [InlineData("${event-properties:almostAsIntProp}", DbType.Int16, (short)124)]
+        [InlineData("${event-properties:almostAsIntProp:norawvalue=true}", DbType.Int16, (short)124)]
+        [InlineData("${event-properties:almostAsIntProp}", DbType.Int32, 124)]
+        [InlineData("${event-properties:almostAsIntProp}", DbType.Int64, (long)124)]
+        [InlineData("${event-properties:almostAsIntProp}", DbType.AnsiString, " 124 ")]
+        public void GetParameterValueTest(string layout, DbType dbtype, object expected, bool convertToDecimal = false)
+        {
+            // Arrange
+            var logEventInfo = new LogEventInfo(LogLevel.Debug, "logger1", "message 2");
+            logEventInfo.Properties["intprop"] = 123;
+            logEventInfo.Properties["boolprop"] = true;
+            logEventInfo.Properties["almostAsIntProp"] = " 124 ";
+            logEventInfo.Properties["dateprop"] = new DateTime(2018, 12, 30, 13, 34, 56);
+
+            var parameterName = "@param1";
+            var databaseParameterInfo = new DatabaseParameterInfo
+            {
+                DbType = dbtype.ToString(),
+                Layout = layout,
+                Name = parameterName,
+            };
+            databaseParameterInfo.SetDbType(new MockDbConnection().CreateCommand().CreateParameter());
+
+            // Act
+            var result = new DatabaseTarget().GetDatabaseParameterValue(logEventInfo, databaseParameterInfo);
+
+            //Assert
+            if (convertToDecimal)
+            {
+                //fix that we can't pass decimals into attributes (InlineData)
+                expected = (decimal)(int)expected;
+            }
+
+            Assert.Equal(expected, result);
+        }
+
+        [Theory]
+        [MemberData(nameof(ConvertFromStringTestCases))]
+        public void GetParameterValueFromStringTest(string value, DbType dbType, object expected, string format = null, CultureInfo cultureInfo = null)
+        {
+
+            var culture = System.Threading.Thread.CurrentThread.CurrentCulture;
+
+            try
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = new CultureInfo("NL-nl");
+
+                // Arrange
+                var databaseParameterInfo = new DatabaseParameterInfo("@test", value)
+                {
+                    Format = format,
+                    DbType = dbType.ToString(),
+                    Culture = cultureInfo,
+                };
+                databaseParameterInfo.SetDbType(new MockDbConnection().CreateCommand().CreateParameter());
+
+                // Act
+                var result = new DatabaseTarget().GetDatabaseParameterValue(LogEventInfo.CreateNullEvent(), databaseParameterInfo);
+
+                // Assert
+                Assert.Equal(expected, result);
+            }
+            finally
+            {
+                // Restore
+                System.Threading.Thread.CurrentThread.CurrentCulture = culture;
+            }
+        }
+
+        public static IEnumerable<object[]> ConvertFromStringTestCases()
+        {
+            yield return new object[] { "true", DbType.Boolean, true };
+            yield return new object[] { "True", DbType.Boolean, true };
+            yield return new object[] { "1,2", DbType.VarNumeric, (decimal)1.2 };
+            yield return new object[] { "1,2", DbType.Currency, (decimal)1.2 };
+            yield return new object[] { "1,2", DbType.Decimal, (decimal)1.2 };
+            yield return new object[] { "1,2", DbType.Double, (double)1.2 };
+            yield return new object[] { "1,2", DbType.Single, (Single)1.2 };
+            yield return new object[] { "2:30", DbType.Time, new TimeSpan(0, 2, 30, 0), };
+            yield return new object[] { "2018-12-23 22:56", DbType.DateTime, new DateTime(2018, 12, 23, 22, 56, 0), };
+            yield return new object[] { "2018-12-23 22:56", DbType.DateTime2, new DateTime(2018, 12, 23, 22, 56, 0), };
+            yield return new object[] { "23-12-2018 22:56", DbType.DateTime, new DateTime(2018, 12, 23, 22, 56, 0), "dd-MM-yyyy HH:mm" };
+            yield return new object[] { new DateTime(2018, 12, 23, 22, 56, 0).ToString(CultureInfo.InvariantCulture), DbType.DateTime, new DateTime(2018, 12, 23, 22, 56, 0), null, CultureInfo.InvariantCulture };
+            yield return new object[] { "2018-12-23", DbType.Date, new DateTime(2018, 12, 23, 0, 0, 0), };
+            yield return new object[] { "2018-12-23 +2:30", DbType.DateTimeOffset, new DateTimeOffset(2018, 12, 23, 0, 0, 0, new TimeSpan(2, 30, 0)) };
+            yield return new object[] { "23-12-2018 22:56 +2:30", DbType.DateTimeOffset, new DateTimeOffset(2018, 12, 23, 22, 56, 0, new TimeSpan(2, 30, 0)), "dd-MM-yyyy HH:mm zzz" };
+            yield return new object[] { "3888CCA3-D11D-45C9-89A5-E6B72185D287", DbType.Guid, Guid.Parse("3888CCA3-D11D-45C9-89A5-E6B72185D287") };
+            yield return new object[] { "3888CCA3D11D45C989A5E6B72185D287", DbType.Guid, Guid.Parse("3888CCA3-D11D-45C9-89A5-E6B72185D287") };
+            yield return new object[] { "3888CCA3D11D45C989A5E6B72185D287", DbType.Guid, Guid.Parse("3888CCA3-D11D-45C9-89A5-E6B72185D287"), "N" };
+            yield return new object[] { "3", DbType.Byte, (byte)3 };
+            yield return new object[] { "3", DbType.SByte, (sbyte)3 };
+            yield return new object[] { "3", DbType.Int16, (short)3 };
+            yield return new object[] { " 3 ", DbType.Int16, (short)3 };
+            yield return new object[] { "3", DbType.Int32, 3 };
+            yield return new object[] { "3", DbType.Int64, (long)3 };
+            yield return new object[] { "3", DbType.UInt16, (ushort)3 };
+            yield return new object[] { "3", DbType.UInt32, (uint)3 };
+            yield return new object[] { "3", DbType.UInt64, (ulong)3 };
+            yield return new object[] { "3", DbType.AnsiString, "3" };
+            yield return new object[] { "${db-null}", DbType.DateTime, DBNull.Value };
+            yield return new object[] { "${event-properties:userid}", DbType.Int32, 0 };
+            yield return new object[] { "${date:universalTime=true:format=yyyy-MM:norawvalue=true}", DbType.DateTime, DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(-DateTime.UtcNow.Day + 1), DateTimeKind.Unspecified) };
+            yield return new object[] { "${shortdate:universalTime=true}", DbType.DateTime, DateTime.UtcNow.Date };
         }
 
         [Fact]
@@ -560,18 +716,18 @@ Parameter #0 Name=msg
 Parameter #0 Size=9
 Parameter #0 Precision=3
 Parameter #0 Scale=7
-Parameter #0 Value=msg1
+Parameter #0 Value=""msg1""
 Add Parameter Parameter #0
 CreateParameter(1)
 Parameter #1 Direction=Input
 Parameter #1 Name=lvl
 Parameter #1 Scale=7
-Parameter #1 Value=Info
+Parameter #1 Value=""Info""
 Add Parameter Parameter #1
 CreateParameter(2)
 Parameter #2 Direction=Input
 Parameter #2 Name=lg
-Parameter #2 Value=MyLogger
+Parameter #2 Value=""MyLogger""
 Add Parameter Parameter #2
 ExecuteNonQuery: INSERT INTO FooBar VALUES(@msg, @lvl, @lg)
 CreateParameter(0)
@@ -580,23 +736,80 @@ Parameter #0 Name=msg
 Parameter #0 Size=9
 Parameter #0 Precision=3
 Parameter #0 Scale=7
-Parameter #0 Value=msg3
+Parameter #0 Value=""msg3""
 Add Parameter Parameter #0
 CreateParameter(1)
 Parameter #1 Direction=Input
 Parameter #1 Name=lvl
 Parameter #1 Scale=7
-Parameter #1 Value=Debug
+Parameter #1 Value=""Debug""
 Add Parameter Parameter #1
 CreateParameter(2)
 Parameter #2 Direction=Input
 Parameter #2 Name=lg
-Parameter #2 Value=MyLogger2
+Parameter #2 Value=""MyLogger2""
 Add Parameter Parameter #2
 ExecuteNonQuery: INSERT INTO FooBar VALUES(@msg, @lvl, @lg)
 Close()
 Dispose()
 ";
+            AssertLog(expectedLog);
+        }
+
+        [Fact]
+        public void ParameterDbTypePropertyNameTest()
+        {
+            MockDbConnection.ClearLog();
+            LoggingConfiguration c = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets>
+                    <target name='dt' type='Database'>
+                        <DBProvider>MockDb</DBProvider>
+                        <ConnectionString>FooBar</ConnectionString>
+                        <CommandText>INSERT INTO FooBar VALUES(@message,@level,@date)</CommandText>
+                        <parameter name='@message' layout='${message}'/>
+                        <parameter name='@level' dbType='MockDbType.Int32' layout='${level:format=Ordinal}'/>
+                        <parameter name='@date' dbType='MockDbType.DateTime' format='yyyy-MM-dd HH:mm:ss.fff' layout='${date:format=yyyy-MM-dd HH\:mm\:ss.fff}'/>
+                    </target>
+                </targets>
+            </nlog>");
+
+            DatabaseTarget dt = c.FindTargetByName("dt") as DatabaseTarget;
+            Assert.NotNull(dt);
+            dt.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
+            dt.Initialize(c);
+            List<Exception> exceptions = new List<Exception>();
+            var alogEvent = new LogEventInfo(LogLevel.Info, "MyLogger", "msg1").WithContinuation(exceptions.Add);
+            dt.WriteAsyncLogEvent(alogEvent);
+            dt.WriteAsyncLogEvent(alogEvent);
+            foreach (var ex in exceptions)
+            {
+                Assert.Null(ex);
+            }
+
+            string expectedLog = @"Open('FooBar').
+CreateParameter(0)
+Parameter #0 Direction=Input
+Parameter #0 Name=@message
+Parameter #0 Value=""msg1""
+Add Parameter Parameter #0
+CreateParameter(1)
+Parameter #1 Direction=Input
+Parameter #1 Name=@level
+Parameter #1 MockDbType=Int32
+Parameter #1 Value=""{0}""
+Add Parameter Parameter #1
+CreateParameter(2)
+Parameter #2 Direction=Input
+Parameter #2 Name=@date
+Parameter #2 MockDbType=DateTime
+Parameter #2 Value={1}
+Add Parameter Parameter #2
+ExecuteNonQuery: INSERT INTO FooBar VALUES(@message,@level,@date)
+Close()
+Dispose()
+";
+            expectedLog = string.Format(expectedLog + expectedLog, LogLevel.Info.Ordinal, alogEvent.LogEvent.TimeStamp.ToString(CultureInfo.InvariantCulture));
             AssertLog(expectedLog);
         }
 
@@ -639,13 +852,16 @@ Dispose()
             MockDbConnection.ClearLog();
             var exceptions = new List<Exception>();
 
-            var db = new DatabaseTarget();
-            db.CommandText = "not important";
-            db.ConnectionString = "cannotconnect";
-            db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
-            db.Initialize(null);
-            db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
-            db.Close();
+            using (new NoThrowNLogExceptions())
+            {
+                var db = new DatabaseTarget();
+                db.CommandText = "not important";
+                db.ConnectionString = "cannotconnect";
+                db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
+                db.Initialize(null);
+                db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
+                db.Close();
+            }
 
             Assert.Single(exceptions);
             Assert.NotNull(exceptions[0]);
@@ -659,16 +875,19 @@ Dispose()
             MockDbConnection.ClearLog();
             var exceptions = new List<Exception>();
 
-            var db = new DatabaseTarget();
-            db.CommandText = "not important";
-            db.ConnectionString = "cannotexecute";
-            db.KeepConnection = true;
-            db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
-            db.Initialize(null);
-            db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
-            db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
-            db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
-            db.Close();
+            using (new NoThrowNLogExceptions())
+            {
+                var db = new DatabaseTarget();
+                db.CommandText = "not important";
+                db.ConnectionString = "cannotexecute";
+                db.KeepConnection = true;
+                db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
+                db.Initialize(null);
+                db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
+                db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
+                db.WriteAsyncLogEvent(LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
+                db.Close();
+            }
 
             Assert.Equal(3, exceptions.Count);
             Assert.NotNull(exceptions[0]);
@@ -700,17 +919,20 @@ Dispose()
             MockDbConnection.ClearLog();
             var exceptions = new List<Exception>();
 
-            var db = new DatabaseTarget();
-            db.CommandText = "not important";
-            db.ConnectionString = "cannotexecute";
-            db.KeepConnection = true;
-            db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
-            db.Initialize(null);
-            db.WriteAsyncLogEvents(
-                LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add),
-                LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add),
-                LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
-            db.Close();
+            using (new NoThrowNLogExceptions())
+            {
+                var db = new DatabaseTarget();
+                db.CommandText = "not important";
+                db.ConnectionString = "cannotexecute";
+                db.KeepConnection = true;
+                db.DBProvider = typeof(MockDbConnection).AssemblyQualifiedName;
+                db.Initialize(null);
+                db.WriteAsyncLogEvents(
+                    LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add),
+                    LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add),
+                    LogEventInfo.CreateNullEvent().WithContinuation(exceptions.Add));
+                db.Close();
+            }
 
             Assert.Equal(3, exceptions.Count);
             Assert.NotNull(exceptions[0]);
@@ -849,11 +1071,7 @@ Dispose()
         }
 #endif
 
-#if NETSTANDARD
-        [Fact(Skip = "NETSTANDARD missing fully working Sqlite")]
-#else
         [Fact]
-#endif
         public void SQLite_InstallAndLogMessageProgrammatically()
         {
             SQLiteTest sqlLite = new SQLiteTest("TestLogProgram.sqlite");
@@ -929,11 +1147,7 @@ Dispose()
 #endif
         }
 
-#if NETSTANDARD
-        [Fact(Skip = "NETSTANDARD missing fully working Sqlite")]
-#else
         [Fact]
-#endif
         public void SQLite_InstallAndLogMessage()
         {
             SQLiteTest sqlLite = new SQLiteTest("TestLogXml.sqlite");
@@ -950,7 +1164,7 @@ Dispose()
                 string dbProvider = GetSQLiteDbProvider();
 
                 // Create log with xml config
-                LogManager.Configuration = CreateConfigurationFromString(@"
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog xmlns='http://www.nlog-project.org/schemas/NLog.xsd'
                   xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' throwExceptions='true'>
                 <targets>
@@ -994,6 +1208,117 @@ Dispose()
             }
         }
 
+        [Fact]
+        public void SQLite_InstallTest()
+        {
+            SQLiteTest sqlLite = new SQLiteTest("TestInstallXml.sqlite");
+
+            // delete database just in case
+            sqlLite.TryDropDatabase();
+            LogManager.ThrowExceptions = true;
+
+            try
+            {
+                sqlLite.CreateDatabase();
+
+                var connectionString = sqlLite.GetConnectionString();
+                string dbProvider = GetSQLiteDbProvider();
+
+                // Create log with xml config
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog xmlns='http://www.nlog-project.org/schemas/NLog.xsd'
+                  xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' throwExceptions='true'>
+                <targets>
+                    <target name='database' xsi:type='Database' dbProvider=""" + dbProvider + @""" connectionstring=""" + connectionString + @"""
+                        commandText='not_important'>
+<install-command ignoreFailures=""false""
+                 text=""CREATE TABLE NLogSqlLiteTestAppNames (
+    Id int PRIMARY KEY,
+    Name varchar(100) NULL
+);
+INSERT INTO NLogSqlLiteTestAppNames(Id, Name) VALUES (1, @appName);"">
+<parameter name='@appName' layout='MyApp' />
+</install-command>
+
+                    </target>
+                </targets>
+                <rules>
+                    <logger name='*' writeTo='database' />
+                </rules>
+            </nlog>");
+
+                //install 
+                InstallationContext context = new InstallationContext();
+                LogManager.Configuration.Install(context);
+
+                // check so table is created
+                var tableName = sqlLite.IssueScalarQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'NLogSqlLiteTestAppNames'");
+                Assert.Equal("NLogSqlLiteTestAppNames", tableName);
+
+                // returns long
+                var logcount = sqlLite.IssueScalarQuery("SELECT count(*) FROM NLogSqlLiteTestAppNames");
+                Assert.Equal((long)1, logcount);
+
+                // check if entry was correct
+                var entryValue = sqlLite.IssueScalarQuery("SELECT Name FROM NLogSqlLiteTestAppNames WHERE ID = 1");
+                Assert.Equal("MyApp", entryValue);
+            }
+            finally
+            {
+                sqlLite.TryDropDatabase();
+            }
+        }
+
+        [Fact]
+        public void SQLite_InstallProgramaticallyTest()
+        {
+            SQLiteTest sqlLite = new SQLiteTest("TestInstallProgram.sqlite");
+
+            // delete database just in case
+            sqlLite.TryDropDatabase();
+            LogManager.ThrowExceptions = true;
+
+            try
+            {
+                sqlLite.CreateDatabase();
+
+                var connectionString = sqlLite.GetConnectionString();
+                string dbProvider = GetSQLiteDbProvider();
+
+                DatabaseTarget testTarget = new DatabaseTarget("TestSqliteTargetInstallProgram");
+                testTarget.ConnectionString = connectionString;
+                testTarget.DBProvider = dbProvider;
+
+                DatabaseCommandInfo installDbCommand = new DatabaseCommandInfo
+                {
+                    Text = "CREATE TABLE NLogSqlLiteTestAppNames (Id int PRIMARY KEY, Name varchar(100) NULL); " +
+                        "INSERT INTO NLogSqlLiteTestAppNames(Id, Name) SELECT 1, @paramOne WHERE NOT EXISTS(SELECT 1 FROM NLogSqlLiteTestAppNames WHERE Name = @paramOne);"
+                };
+                installDbCommand.Parameters.Add(new DatabaseParameterInfo("@paramOne", "MyApp"));
+                testTarget.InstallDdlCommands.Add(installDbCommand);
+
+                //install 
+                InstallationContext context = new InstallationContext();
+                testTarget.Install(context);
+
+                // check so table is created
+                var tableName = sqlLite.IssueScalarQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'NLogSqlLiteTestAppNames'");
+                Assert.Equal("NLogSqlLiteTestAppNames", tableName);
+
+                // returns long
+                var logcount = sqlLite.IssueScalarQuery("SELECT count(*) FROM NLogSqlLiteTestAppNames");
+                Assert.Equal((long)1, logcount);
+
+                // check if entry was correct
+                var entryValue = sqlLite.IssueScalarQuery("SELECT Name FROM NLogSqlLiteTestAppNames WHERE ID = 1");
+                Assert.Equal("MyApp", entryValue);
+            }
+            finally
+            {
+                sqlLite.TryDropDatabase();
+            }
+        }
+
         private void SetupSqliteConfigWithInvalidInstallCommand(string databaseName)
         {
             var nlogXmlConfig = @"
@@ -1013,50 +1338,55 @@ Dispose()
 
             // Use an in memory SQLite database
             // See https://www.sqlite.org/inmemorydb.html
+#if NETSTANDARD
+            var connectionString = "Data Source=:memory:";
+#else
             var connectionString = "Uri=file::memory:;Version=3";
+#endif
 
-            LogManager.Configuration = CreateConfigurationFromString(
-                String.Format(nlogXmlConfig, GetSQLiteDbProvider(), connectionString)
-            );
+
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(String.Format(nlogXmlConfig, GetSQLiteDbProvider(), connectionString));
         }
 
         [Fact]
         public void NotRethrowingInstallExceptions()
         {
-            SetupSqliteConfigWithInvalidInstallCommand("not_rethrowing_install_exceptions");
+            using (new NoThrowNLogExceptions())
+            {
+                SetupSqliteConfigWithInvalidInstallCommand("not_rethrowing_install_exceptions");
 
-            // Default InstallationContext should not rethrow exceptions
-            InstallationContext context = new InstallationContext();
+                // Default InstallationContext should not rethrow exceptions
+                InstallationContext context = new InstallationContext();
 
-            Assert.False(context.IgnoreFailures, "Failures should not be ignored by default");
-            Assert.False(context.ThrowExceptions, "Exceptions should not be thrown by default");
+                Assert.False(context.IgnoreFailures, "Failures should not be ignored by default");
+                Assert.False(context.ThrowExceptions, "Exceptions should not be thrown by default");
 
-            var exRecorded = Record.Exception(() => LogManager.Configuration.Install(context));
-            Assert.Null(exRecorded);
+                var exRecorded = Record.Exception(() => LogManager.Configuration.Install(context));
+                Assert.Null(exRecorded);
+            }
         }
 
-#if NETSTANDARD
-        [Fact(Skip = "NETSTANDARD missing fully working Sqlite")]
-#else
+
         [Fact]
-#endif
         public void RethrowingInstallExceptions()
         {
-            SetupSqliteConfigWithInvalidInstallCommand("rethrowing_install_exceptions");
-
-            InstallationContext context = new InstallationContext()
+            using (new NoThrowNLogExceptions())
             {
-                ThrowExceptions = true
-            };
+                SetupSqliteConfigWithInvalidInstallCommand("rethrowing_install_exceptions");
 
-            Assert.True(context.ThrowExceptions);  // Sanity check
+                InstallationContext context = new InstallationContext()
+                {
+                    ThrowExceptions = true
+                };
+
+                Assert.True(context.ThrowExceptions);  // Sanity check
 
 #if MONO || NETSTANDARD
-            Assert.Throws<SqliteException>(() => LogManager.Configuration.Install(context));
+                Assert.Throws<SqliteException>(() => LogManager.Configuration.Install(context));
 #else
-            Assert.Throws<SQLiteException>(() => LogManager.Configuration.Install(context));
+                Assert.Throws<SQLiteException>(() => LogManager.Configuration.Install(context));
 #endif
-
+            }
         }
 
         [Fact]
@@ -1128,17 +1458,19 @@ Dispose()
                 SqlServerTest.CreateDatabase(isAppVeyor);
 
                 var connectionString = SqlServerTest.GetConnectionString(IsAppVeyor());
-                LogManager.Configuration = CreateConfigurationFromString(@"
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog xmlns='http://www.nlog-project.org/schemas/NLog.xsd'
                   xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' throwExceptions='true'>
                 <targets>
                     <target name='database' xsi:type='Database' connectionstring=""" + connectionString + @"""
-                        commandText='insert into dbo.NLogSqlServerTest (Uid) values (@uid);'>
+                        commandText='insert into dbo.NLogSqlServerTest (Uid, LogDate) values (@uid, @logdate);'>
                         <parameter name='@uid' layout='${event-properties:uid}' />
+                        <parameter name='@logdate' layout='${date}' />
 <install-command ignoreFailures=""false""
                  text=""CREATE TABLE dbo.NLogSqlServerTest (
     Id       int               NOT NULL IDENTITY(1,1) PRIMARY KEY CLUSTERED,
-    Uid      uniqueidentifier  NULL
+    Uid      uniqueidentifier  NULL,
+    LogDate  date              NULL
 );""/>
 
                     </target>
@@ -1174,6 +1506,10 @@ Dispose()
                 var result = SqlServerTest.IssueScalarQuery(isAppVeyor, "SELECT Uid FROM dbo.NLogSqlServerTest");
 
                 Assert.Equal(uid, result);
+
+                var result2 = SqlServerTest.IssueScalarQuery(isAppVeyor, "SELECT LogDate FROM dbo.NLogSqlServerTest");
+
+                Assert.Equal(DateTime.Today, result2);
             }
             finally
             {
@@ -1228,6 +1564,30 @@ Dispose()
             Assert.NotNull(databaseTarget.ProviderFactory);
             Assert.Equal(typeof(SqlClientFactory), databaseTarget.ProviderFactory.GetType());
         }
+
+        [Fact]
+        public void GetProviderNameFromConnectionString()
+        {
+            LogManager.ThrowExceptions = true;
+            var databaseTarget = new DatabaseTarget()
+            {
+                Name = "myTarget",
+                ConnectionStringName = "test_connectionstring_with_providerName",
+                CommandText = "notimportant",
+            };
+
+            databaseTarget.ConnectionStringsSettings = new ConnectionStringSettingsCollection()
+            {
+                new ConnectionStringSettings("test_connectionstring_with_providerName",
+                    "metadata=res://*/Model.csdl|res://*/Model.ssdl|res://*/Model.msl;provider=System.Data.SqlClient;provider connection string=\"data source=192.168.0.100;initial catalog=TEST_DB;user id=myUser;password=SecretPassword;multipleactiveresultsets=True;application name=EntityFramework\"",
+                    "System.Data.EntityClient"),
+            };
+
+            databaseTarget.Initialize(null);
+            Assert.NotNull(databaseTarget.ProviderFactory);
+            Assert.Equal(typeof(SqlClientFactory), databaseTarget.ProviderFactory.GetType());
+            Assert.Equal("data source=192.168.0.100;initial catalog=TEST_DB;user id=myUser;password=SecretPassword;multipleactiveresultsets=True;application name=EntityFramework", ((NLog.Layouts.SimpleLayout)databaseTarget.ConnectionString).FixedText);
+        }
 #endif
 
         [Theory]
@@ -1236,8 +1596,8 @@ Dispose()
         [InlineData("", false)]
         public void WarningForObsoleteUseTransactions(string property, bool printWarning)
         {
-            LoggingConfiguration c = CreateConfigurationFromString($@"
-            <nlog ThrowExceptions='true'>
+            LoggingConfiguration c = XmlLoggingConfiguration.CreateFromXmlString($@"
+            <nlog ThrowExceptions='true' internalLogLevel='Info'>
                 <targets>
                     <target type='database' {property} name='t1' commandtext='fake sql' connectionstring='somewhere' />
                 </targets>
@@ -1267,6 +1627,67 @@ Dispose()
                 Assert.DoesNotContain("obsolete", internalLog, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("usetransactions", internalLog, StringComparison.OrdinalIgnoreCase);
             }
+        }
+
+        [Theory]
+        [InlineData("localhost", "MyDatabase", "user", "password", "Server=localhost;User id=user;Password=password;Database=MyDatabase")]
+        [InlineData("localhost", null, "user", "password", "Server=localhost;User id=user;Password=password;")]
+        [InlineData("localhost", "MyDatabase", "user", "'password'", "Server=localhost;User id=user;Password='password';Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "\"password\"", "Server=localhost;User id=user;Password=\"password\";Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "pa;ssword", "Server=localhost;User id=user;Password='pa;ssword';Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "pa'ssword", "Server=localhost;User id=user;Password=\"pa'ssword\";Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "pa'\"ssword", "Server=localhost;User id=user;Password=\"pa'\"\"ssword\";Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "pa\"ssword", "Server=localhost;User id=user;Password='pa\"ssword';Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", "user", "", "Server=localhost;User id=user;Password=;Database=MyDatabase")]
+        [InlineData("localhost", "MyDatabase", null, "password", "Server=localhost;Trusted_Connection=SSPI;Database=MyDatabase")]
+        public void DatabaseConnectionStringTest(string host, string database, string username, string password, string expected)
+        {
+            // Arrange
+            var databaseTarget = new NonLoggingDatabaseTarget()
+            {
+                CommandText = "DoSomething",
+                Name = "myTarget",
+                DBHost = host,
+                DBDatabase = database,
+                DBUserName = username,
+                DBPassword = password
+            };
+
+            var logEventInfo = LogEventInfo.CreateNullEvent();
+
+            // Act
+            var result = databaseTarget.GetRenderedConnectionString(logEventInfo);
+
+            // Assert
+            Assert.Equal(expected, result);
+        }
+
+        [Theory]
+        [InlineData("password", "password")]
+        [InlineData("", "")]
+        [InlineData("password'", "\"password'\"")]
+        public void DatabaseConnectionStringViaVariableTest(string password, string expectedPassword)
+        {
+            // Arrange
+            var databaseTarget = new NonLoggingDatabaseTarget()
+            {
+                CommandText = "DoSomething",
+                Name = "myTarget",
+                DBHost = "localhost",
+                DBDatabase = "MyDatabase",
+                DBUserName = "user",
+                DBPassword = "${event-properties:myPassword}"
+            };
+
+            var logEventInfo = LogEventInfo.Create(LogLevel.Debug, "logger1", "message1");
+            logEventInfo.Properties["myPassword"] = password;
+
+            // Act
+            var result = databaseTarget.GetRenderedConnectionString(logEventInfo);
+
+            // Assert
+            var expected = $"Server=localhost;User id=user;Password={expectedPassword};Database=MyDatabase";
+            Assert.Equal(expected, result);
         }
 
         private static void AssertLog(string expectedLog)
@@ -1339,7 +1760,7 @@ Dispose()
                 AddToLog("Open('{0}').", ConnectionString);
                 if (ConnectionString == "cannotconnect")
                 {
-                    throw new InvalidOperationException("Cannot open fake database.");
+                    throw new ApplicationException("Cannot open fake database.");
                 }
             }
 
@@ -1363,6 +1784,14 @@ Dispose()
                 }
 
                 Log += message + "\r\n";
+            }
+        }
+
+        private class NonLoggingDatabaseTarget : DatabaseTarget
+        {
+            public string GetRenderedConnectionString(LogEventInfo logEventInfo)
+            {
+                return base.BuildConnectionString(logEventInfo);
             }
         }
 
@@ -1400,7 +1829,7 @@ Dispose()
                 ((MockDbConnection)Connection).AddToLog("ExecuteNonQuery: {0}", CommandText);
                 if (Connection.ConnectionString == "cannotexecute")
                 {
-                    throw new InvalidOperationException("Failure during ExecuteNonQuery");
+                    throw new ApplicationException("Failure during ExecuteNonQuery");
                 }
 
                 return 0;
@@ -1459,8 +1888,21 @@ Dispose()
 
             public DbType DbType
             {
-                get => parameterType;
-                set => parameterType = value;
+                get { return parameterType; }
+                set
+                {
+                    ((MockDbConnection)mockDbCommand.Connection).AddToLog("Parameter #{0} DbType={1}", paramId, value);
+                    parameterType = value;
+                }
+            }
+            public DbType MockDbType
+            {
+                get { return parameterType; }
+                set
+                {
+                    ((MockDbConnection)mockDbCommand.Connection).AddToLog("Parameter #{0} MockDbType={1}", paramId, value);
+                    parameterType = value;
+                }
             }
 
             public ParameterDirection Direction
@@ -1499,7 +1941,8 @@ Dispose()
                 get => parameterValue;
                 set
                 {
-                    ((MockDbConnection)mockDbCommand.Connection).AddToLog("Parameter #{0} Value={1}", paramId, value);
+                    object valueOutput = value is string valueString ? $"\"{valueString}\"" : value;
+                    ((MockDbConnection)mockDbCommand.Connection).AddToLog("Parameter #{0} Value={1}", paramId, valueOutput);
                     parameterValue = value;
                 }
             }
@@ -1683,7 +2126,11 @@ Dispose()
             public SQLiteTest(string dbName)
             {
                 this.dbName = dbName;
+#if NETSTANDARD
+                connectionString = "Data Source=" + this.dbName;
+#else
                 connectionString = "Data Source=" + this.dbName + ";Version=3;";
+#endif
             }
 
             public string GetConnectionString()

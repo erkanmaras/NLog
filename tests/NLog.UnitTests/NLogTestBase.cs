@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security;
@@ -71,7 +72,8 @@ namespace NLog.UnitTests
 
             LogManager.Configuration = null;
             InternalLogger.Reset();
-            LogManager.ThrowExceptions = false;
+            InternalLogger.LogLevel = LogLevel.Off;
+            LogManager.ThrowExceptions = true;  // Ensure exceptions are thrown by default during unit-testing
             LogManager.ThrowConfigExceptions = null;
             System.Diagnostics.Trace.Listeners.Clear();
 #if !NETSTANDARD
@@ -134,7 +136,7 @@ namespace NLog.UnitTests
             {
                 if (encodedBuf[i] != buf[i])
                     Assert.True(encodedBuf[i] == buf[i],
-                        $"File:{fileName} content mismatch {(int) encodedBuf[i]} <> {(int) buf[i]} at index {i}");
+                        $"File:{fileName} content mismatch {(int)encodedBuf[i]} <> {(int)buf[i]} at index {i}");
             }
         }
 
@@ -240,13 +242,26 @@ namespace NLog.UnitTests
                 if (preamble.Length > 0)
                 {
                     //insert before
-
                     encodedBuf = preamble.Concat(encodedBuf).ToArray();
-
                 }
             }
 
-            byte[] buf = File.ReadAllBytes(fileName);
+            byte[] buf;
+            using (var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                int index = 0;
+                int count = (int)fs.Length;
+                buf = new byte[count];
+                while (count > 0)
+                {
+                    int n = fs.Read(buf, index, count);
+                    if (n == 0)
+                        break;
+                    index += n;
+                    count -= n;
+                }
+            }
+
             Assert.True(encodedBuf.Length == buf.Length,
                 $"File:{fileName} encodedBytes:{encodedBuf.Length} does not match file.content:{buf.Length}, file.length = {fi.Length}");
 
@@ -254,7 +269,7 @@ namespace NLog.UnitTests
             {
                 if (encodedBuf[i] != buf[i])
                     Assert.True(encodedBuf[i] == buf[i],
-                        $"File:{fileName} content mismatch {(int) encodedBuf[i]} <> {(int) buf[i]} at index {i}");
+                        $"File:{fileName} content mismatch {(int)encodedBuf[i]} <> {(int)buf[i]} at index {i}");
             }
         }
 
@@ -298,9 +313,8 @@ namespace NLog.UnitTests
                         Assert.False(true, "File contains '" + contentToCheck + "'");
                 }
             }
-
-            return;
         }
+
         protected string StringRepeat(int times, string s)
         {
             StringBuilder sb = new StringBuilder(s.Length * times);
@@ -349,26 +363,6 @@ namespace NLog.UnitTests
         }
 #endif
 
-        public static XmlLoggingConfiguration CreateConfigurationFromString(string configXml)
-        {
-            XmlDocument doc = new XmlDocument();
-            doc.LoadXml(configXml);
-
-            string currentDirectory = null;
-            try
-            {
-                currentDirectory = Environment.CurrentDirectory;
-            }
-            catch (SecurityException)
-            {
-                //ignore   
-            }
-
-
-
-            return new XmlLoggingConfiguration(doc.DocumentElement, currentDirectory);
-        }
-
         protected string RunAndCaptureInternalLog(SyncAction action, LogLevel internalLogLevel)
         {
             var stringWriter = new Logger();
@@ -378,6 +372,32 @@ namespace NLog.UnitTests
             action();
 
             return stringWriter.ToString();
+        }
+        /// <summary>
+        /// To handle unstable integration tests, retry if failed
+        /// </summary>
+        /// <param name="tries"></param>
+        /// <param name="action"></param>
+        protected void RetryingIntegrationTest(int tries, Action action)
+        {
+            int tried = 0;
+            while (tried < tries)
+            {
+                try
+                {
+                    tried++;
+                    action();
+                    return; //success
+                }
+                catch (Exception)
+                {
+                    if (tried >= tries)
+                    {
+                        throw;
+                    }
+                }
+
+            }
         }
 
         /// <summary>
@@ -465,6 +485,22 @@ namespace NLog.UnitTests
 
         public delegate void SyncAction();
 
+        public class NoThrowNLogExceptions : IDisposable
+        {
+            private readonly bool throwExceptions;
+
+            public NoThrowNLogExceptions()
+            {
+                throwExceptions = LogManager.ThrowExceptions;
+                LogManager.ThrowExceptions = false;
+            }
+
+            public void Dispose()
+            {
+                LogManager.ThrowExceptions = throwExceptions;
+            }
+        }
+
         public class InternalLoggerScope : IDisposable
         {
             private readonly TextWriter oldConsoleOutputWriter;
@@ -477,6 +513,8 @@ namespace NLog.UnitTests
 
             public InternalLoggerScope(bool redirectConsole = false)
             {
+                InternalLogger.LogLevel = LogLevel.Info;
+
                 if (redirectConsole)
                 {
                     ConsoleOutputWriter = new StringWriter() { NewLine = "\n" };
@@ -529,6 +567,12 @@ namespace NLog.UnitTests
                 LogManager.ThrowExceptions = throwExceptions;
                 LogManager.ThrowConfigExceptions = throwConfigExceptions;
             }
+        }
+
+        protected static void AssertContainsInDictionary<TKey, TValue>(IDictionary<TKey, TValue> dictionary, TKey key, TValue value)
+        {
+            Assert.Contains(key, dictionary);
+            Assert.Equal(value, dictionary[key]);
         }
     }
 }

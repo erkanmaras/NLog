@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,14 +33,16 @@
 
 namespace NLog.LayoutRenderers.Wrappers
 {
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Encodes the result of another layout output for use with URLs.
     /// </summary>
     [LayoutRenderer("url-encode")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class UrlEncodeLayoutRendererWrapper : WrapperLayoutRendererBase
     {
         /// <summary>
@@ -81,9 +83,9 @@ namespace NLog.LayoutRenderers.Wrappers
         {
             if (!string.IsNullOrEmpty(text))
             {
-                UrlHelper.EscapeEncodingFlag encodingFlags = UrlHelper.GetUriStringEncodingFlags(EscapeDataNLogLegacy, SpaceAsPlus, EscapeDataRfc3986);
+                UrlHelper.EscapeEncodingOptions encodingOptions = UrlHelper.GetUriStringEncodingFlags(EscapeDataNLogLegacy, SpaceAsPlus, EscapeDataRfc3986);
                 System.Text.StringBuilder sb = new System.Text.StringBuilder(text.Length + 20);
-                UrlHelper.EscapeDataEncode(text, sb, encodingFlags);
+                UrlHelper.EscapeDataEncode(text, sb, encodingOptions);
                 return sb.ToString();
             }
             return string.Empty;

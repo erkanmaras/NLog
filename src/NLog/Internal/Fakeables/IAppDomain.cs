@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,6 +34,7 @@
 namespace NLog.Internal.Fakeables
 {
     using System;
+    using System.Reflection;
     using System.Collections.Generic;
 
     /// <summary>
@@ -65,6 +66,12 @@ namespace NLog.Internal.Fakeables
         /// Gets an integer that uniquely identifies the application domain within the process. 
         /// </summary>
         int Id { get; }
+
+        /// <summary>
+        /// Gets the assemblies that have been loaded into the execution context of this application domain.
+        /// </summary>
+        /// <returns>A list of assemblies in this application domain.</returns>
+        IEnumerable<Assembly> GetAssemblies();
 
         /// <summary>
         /// Process exit event.

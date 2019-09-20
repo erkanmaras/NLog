@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,9 +34,8 @@
 namespace NLog.Targets.Wrappers
 {
     using System;
-    using Common;
-    using Config;
-    using Internal;
+    using NLog.Common;
+    using NLog.Config;
 
     /// <summary>
     /// Base class for targets wrap other (single) targets.
@@ -56,7 +55,7 @@ namespace NLog.Targets.Wrappers
         /// <returns>A string that describes the target.</returns>
         public override string ToString()
         {
-            return base.ToString() + "(" + WrappedTarget + ")";
+            return $"{base.ToString()}({WrappedTarget})";
         }
 
         /// <summary>
@@ -73,7 +72,7 @@ namespace NLog.Targets.Wrappers
         /// classes.
         /// </summary>
         /// <param name="logEvent">Logging event to be written out.</param>
-        protected override sealed void Write(LogEventInfo logEvent)
+        protected sealed override void Write(LogEventInfo logEvent)
         {
             throw new NotSupportedException("This target must not be invoked in a synchronous way.");
         }

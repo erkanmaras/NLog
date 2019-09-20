@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -59,18 +59,7 @@ namespace NLog.UnitTests.Internal
             {
                 int times = 25;
 
-                {
-                    // ClassUnderTest must extend MarshalByRefObject
-                    AppDomain partialTrusted;
-                    var classUnderTest = MediumTrustContext.Create<ClassUnderTest>(fileWritePath, out partialTrusted);
-#if NET4_0 || NET4_5
-                    using (NestedDiagnosticsLogicalContext.Push("PartialTrust"))
-#endif
-                    {
-                        classUnderTest.PartialTrustSuccess(times, fileWritePath);
-                    }
-                    AppDomain.Unload(partialTrusted);
-                }
+                RunAppDomainTestMethod(fileWritePath, times, true);
 
                 // this also checks that thread-volatile layouts
                 // such as ${threadid} are properly cached and not recalculated
@@ -94,30 +83,66 @@ namespace NLog.UnitTests.Internal
 
                 AssertFileContents(Path.Combine(fileWritePath, "Fatal.txt"),
                     StringRepeat(times, "eee " + threadID + "\n"), Encoding.UTF8);
+
             }
             finally
             {
                 if (Directory.Exists(fileWritePath))
                     Directory.Delete(fileWritePath, true);
-
-                // Clean up configuration change, breaks onetimeonlyexceptioninhandlertest
-                LogManager.ThrowExceptions = true;
             }
         }
+
+        [Fact]
+        public void MediumTrustWithExternalClassNoAutoFlush()
+        {
+            var fileWritePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            try
+            {
+                int times = 5;
+                RunAppDomainTestMethod(fileWritePath, times, false);
+
+                Assert.False(File.Exists(Path.Combine(fileWritePath, "Trace.txt")));
+                Assert.False(File.Exists(Path.Combine(fileWritePath, "Debug.txt")));
+                Assert.False(File.Exists(Path.Combine(fileWritePath, "Warn.txt")));
+                Assert.False(File.Exists(Path.Combine(fileWritePath, "Error.txt")));
+                Assert.False(File.Exists(Path.Combine(fileWritePath, "Fatal.txt")));
+            }
+            finally
+            {
+                if (Directory.Exists(fileWritePath))
+                    Directory.Delete(fileWritePath, true);
+            }
+        }
+
+        private static void RunAppDomainTestMethod(string fileWritePath, int times, bool autoShutdown)
+        {
+            // ClassUnderTest must extend MarshalByRefObject
+            AppDomain partialTrusted;
+            var classUnderTest = MediumTrustContext.Create<ClassUnderTest>(fileWritePath, out partialTrusted);
+#if NET4_0 || NET4_5
+            MappedDiagnosticsLogicalContext.Set("Winner", new { Hero = "Zero" });
+            using (NestedDiagnosticsLogicalContext.Push(new { Hello = "World" }))
+#endif
+            {
+                classUnderTest.PartialTrustSuccess(times, fileWritePath, autoShutdown);
+            }
+            AppDomain.Unload(partialTrusted);
+        }
+
     }
 
     [Serializable]
     public class ClassUnderTest : MarshalByRefObject
     {
-        public void PartialTrustSuccess(int times, string fileWritePath)
+        public void PartialTrustSuccess(int times, string fileWritePath, bool autoShutdown)
         {
             var filePath = Path.Combine(fileWritePath, "${level}.txt");
 
             // NOTE Using BufferingWrapper to validate that DomainUnload remembers to perform flush
             var configXml = $@"
-            <nlog throwExceptions='false'>
+            <nlog throwExceptions='false' autoShutdown='{autoShutdown}'>
                 <targets async='true'> 
-                    <target name='file' type='BufferingWrapper' bufferSize='10000' flushTimeout='15000'>
+                    <target name='file' type='BufferingWrapper' bufferSize='10000'>
                         <target name='filewrapped' type='file' layout='${{message}} ${{threadid}}' filename='{
                     filePath
                 }' LineEnding='lf' />
@@ -129,21 +154,24 @@ namespace NLog.UnitTests.Internal
                 </rules>
             </nlog>";
 
-            LogManager.Configuration = NLogTestBase.CreateConfigurationFromString(configXml);
-
-            //this method gave issues
-            LogFactory.LogConfigurationInitialized();
-
-            ILogger logger = LogManager.GetLogger("NLog.UnitTests.Targets.FileTargetTests");
-
-            for (var i = 0; i < times; ++i)
+            using (new NLogTestBase.NoThrowNLogExceptions())
             {
-                logger.Trace("@@@");
-                logger.Debug("aaa");
-                logger.Info("bbb");
-                logger.Warn("ccc");
-                logger.Error("ddd");
-                logger.Fatal("eee");
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(configXml);
+
+                //this method gave issues
+                LogFactory.LogConfigurationInitialized();
+
+                ILogger logger = LogManager.GetLogger("NLog.UnitTests.Targets.FileTargetTests");
+
+                for (var i = 0; i < times; ++i)
+                {
+                    logger.Trace("@@@");
+                    logger.Debug("aaa");
+                    logger.Info("bbb");
+                    logger.Warn("ccc");
+                    logger.Error("ddd");
+                    logger.Fatal("eee");
+                }
             }
         }
     }

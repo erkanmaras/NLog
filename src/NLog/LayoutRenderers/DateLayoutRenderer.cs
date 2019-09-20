@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,18 +34,19 @@
 namespace NLog.LayoutRenderers
 {
     using System;
-    using System.Collections.Generic;
     using System.ComponentModel;
     using System.Globalization;
     using System.Text;
-    using Config;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Current date and time.
     /// </summary>
     [LayoutRenderer("date")]
     [ThreadAgnostic]
-    public class DateLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class DateLayoutRenderer : LayoutRenderer, IRawValue, IStringValueRenderer
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="DateLayoutRenderer" /> class.
@@ -73,16 +74,17 @@ namespace NLog.LayoutRenderers
             set
             {
                 _format = value;
-
                 // Check if caching should be used
-                DateTime cachedDateTime = IsLowTimeResolutionLayout(_format)
-                    ? DateTime.MaxValue     // Cache can be used, will update cache-value
-                    : DateTime.MinValue;    // No cache support
-                _cachedUtcTime = new KeyValuePair<DateTime, string>(cachedDateTime, string.Empty);
-                _cachedLocalTime = new KeyValuePair<DateTime, string>(cachedDateTime, string.Empty);
+                if (IsLowTimeResolutionLayout(_format))
+                    _cachedDateFormatted = new CachedDateFormatted(DateTime.MaxValue, string.Empty); // Cache can be used, will update cache-value
+                else
+                    _cachedDateFormatted = new CachedDateFormatted(DateTime.MinValue, string.Empty); // No cache support
             }
         }
         private string _format;
+
+        private const string _lowTimeResolutionChars = "YyMDdHh";
+        private CachedDateFormatted _cachedDateFormatted = new CachedDateFormatted(DateTime.MinValue, string.Empty);
 
         /// <summary>
         /// Gets or sets a value indicating whether to output UTC time instead of local time.
@@ -91,32 +93,58 @@ namespace NLog.LayoutRenderers
         [DefaultValue(false)]
         public bool UniversalTime { get; set; }
 
-        private const string _lowTimeResolutionChars = "YyMDdHh";
-
-        /// <summary>Cache-key (Last DateTime.UtcNow) + Cache-Value (DateTime.Format result)</summary>
-        private KeyValuePair<DateTime, string> _cachedUtcTime = new KeyValuePair<DateTime, string>();
-        /// <summary>Cache-key (Last DateTime.Now) + Cache-Value (DateTime.Format result)</summary>
-        private KeyValuePair<DateTime, string> _cachedLocalTime = new KeyValuePair<DateTime, string>();
-
-        /// <summary>
-        /// Renders the current date and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            builder.Append(GetStringValue(logEvent));
+        }
+
+        /// <inheritdoc/>
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            value =  GetDate(logEvent);
+            return true;
+        }
+
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => GetStringValue(logEvent);
+
+        private string GetStringValue(LogEventInfo logEvent)
         {
             var formatProvider = GetFormatProvider(logEvent, Culture);
 
-            var ts = logEvent.TimeStamp;
-            if (UniversalTime)
+            DateTime timestamp = GetDate(logEvent);
+
+            var cachedDateFormatted = _cachedDateFormatted;
+            if (!ReferenceEquals(formatProvider, CultureInfo.InvariantCulture) || cachedDateFormatted.Date == DateTime.MinValue)
             {
-                ts = ts.ToUniversalTime();
-                AppendDateLayout(builder, formatProvider, ts, ref _cachedUtcTime);
+                cachedDateFormatted = null;
             }
             else
             {
-                AppendDateLayout(builder, formatProvider, ts, ref _cachedLocalTime);
+                if (cachedDateFormatted.Date == timestamp.Date.AddHours(timestamp.Hour))
+                {
+                    return cachedDateFormatted.FormattedDate;   // Cache hit
+                }
             }
+
+            string formatTime = timestamp.ToString(_format, formatProvider);
+            if (cachedDateFormatted != null)
+            {
+                _cachedDateFormatted = new CachedDateFormatted(timestamp.Date.AddHours(timestamp.Hour), formatTime);
+            }
+            return formatTime;
+        }
+
+        private DateTime GetDate(LogEventInfo logEvent)
+        {
+            var timestamp = logEvent.TimeStamp;
+            if (UniversalTime)
+            {
+                timestamp = timestamp.ToUniversalTime();
+            }
+
+            return timestamp;
         }
 
         private static bool IsLowTimeResolutionLayout(string dateTimeFormat)
@@ -130,19 +158,16 @@ namespace NLog.LayoutRenderers
             return true;
         }
 
-        private void AppendDateLayout(StringBuilder builder, IFormatProvider formatProvider, DateTime timestamp, ref KeyValuePair<DateTime, string> cachedTime)
+        private class CachedDateFormatted
         {
-            bool cachingEnabled = ReferenceEquals(formatProvider, CultureInfo.InvariantCulture) && cachedTime.Key != DateTime.MinValue;
-            if (cachingEnabled && cachedTime.Key == timestamp.Date.AddHours(timestamp.Hour))
+            public CachedDateFormatted(DateTime date, string formattedDate)
             {
-                builder.Append(cachedTime.Value);
-                return; // Cache hit
+                Date = date;
+                FormattedDate = formattedDate;
             }
 
-            string formatTime = timestamp.ToString(_format, formatProvider);
-            if (cachingEnabled)
-                cachedTime = new KeyValuePair<DateTime, string>(timestamp.Date.AddHours(timestamp.Hour), formatTime);
-            builder.Append(formatTime);
+            public readonly DateTime Date;
+            public readonly string FormattedDate;
         }
     }
 }

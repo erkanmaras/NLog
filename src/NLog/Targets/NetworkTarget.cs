@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,9 +38,10 @@ namespace NLog.Targets
     using System.ComponentModel;
     using System.Text;
     using System.Threading;
-    using Common;
-    using Internal.NetworkSenders;
-    using Layouts;
+    using NLog.Common;
+    using NLog.Internal;
+    using NLog.Internal.NetworkSenders;
+    using NLog.Layouts;
 
     /// <summary>
     /// Sends log messages over the network.
@@ -82,8 +83,10 @@ namespace NLog.Targets
     [Target("Network")]
     public class NetworkTarget : TargetWithLayout
     {
-        private Dictionary<string, LinkedListNode<NetworkSender>> _currentSenderCache = new Dictionary<string, LinkedListNode<NetworkSender>>();
-        private LinkedList<NetworkSender> _openNetworkSenders = new LinkedList<NetworkSender>();
+        private readonly Dictionary<string, LinkedListNode<NetworkSender>> _currentSenderCache = new Dictionary<string, LinkedListNode<NetworkSender>>();
+        private readonly LinkedList<NetworkSender> _openNetworkSenders = new LinkedList<NetworkSender>();
+
+        private readonly ReusableBufferCreator _reusableEncodingBuffer = new ReusableBufferCreator(16 * 1024);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="NetworkTarget" /> class.
@@ -100,6 +103,7 @@ namespace NLog.Targets
             MaxMessageSize = 65000;
             ConnectionCacheSize = 5;
             LineEnding = LineEndingMode.CRLF;
+            OptimizeBufferReuse = GetType() == typeof(NetworkTarget);   // Class not sealed, reduce breaking changes
         }
 
         /// <summary>
@@ -173,18 +177,18 @@ namespace NLog.Targets
         /// Gets or sets the maximum current connections. 0 = no maximum.
         /// </summary>
         /// <docgen category="Connection Options" order="10"/>
-        [DefaultValue(0)]
         public int MaxConnections { get; set; }
 
         /// <summary>
         /// Gets or sets the action that should be taken if the will be more connections than <see cref="MaxConnections"/>.
         /// </summary>
-        /// <docgen category='Layout Options' order='10' />
+        /// <docgen category='Connection Options' order='10' />
         public NetworkTargetConnectionsOverflowAction OnConnectionOverflow { get; set; }
 
         /// <summary>
         /// Gets or sets the maximum queue size.
         /// </summary>
+        /// <docgen category='Connection Options' order='10' />
         [DefaultValue(0)]
         public int MaxQueueSize { get; set; }
 
@@ -192,7 +196,8 @@ namespace NLog.Targets
         /// Gets or sets the action that should be taken if the message is larger than
         /// maxMessageSize.
         /// </summary>
-        /// <docgen category='Layout Options' order='10' />
+        /// <docgen category='Connection Options' order='10' />
+        [DefaultValue(NetworkTargetOverflowAction.Split)]
         public NetworkTargetOverflowAction OnOverflow { get; set; }
 
         /// <summary>
@@ -202,6 +207,19 @@ namespace NLog.Targets
         [DefaultValue("utf-8")]
         public Encoding Encoding { get; set; }
 
+#if !SILVERLIGHT
+        /// <summary>
+        /// Get or set the SSL/TLS protocols. Default no SSL/TLS is used. Currently only implemented for TCP.
+        /// </summary>
+        /// <docgen category='Connection Options' order='10' />
+        public System.Security.Authentication.SslProtocols SslProtocols { get; set; } = System.Security.Authentication.SslProtocols.None;
+
+        /// <summary>
+        /// The number of seconds a connection will remain idle before the first keep-alive probe is sent
+        /// </summary>
+        public int KeepAliveTimeSeconds { get; set; }
+#endif
+
         internal INetworkSenderFactory SenderFactory { get; set; }
 
         /// <summary>
@@ -210,17 +228,16 @@ namespace NLog.Targets
         /// <param name="asyncContinuation">The asynchronous continuation.</param>
         protected override void FlushAsync(AsyncContinuation asyncContinuation)
         {
-            int remainingCount = 0;
+            int remainingCount;
 
-            AsyncContinuation continuation =
-                ex =>
+            void Continuation(Exception ex)
+            {
+                // ignore exception
+                if (Interlocked.Decrement(ref remainingCount) == 0)
                 {
-                    // ignore exception
-                    if (Interlocked.Decrement(ref remainingCount) == 0)
-                    {
-                        asyncContinuation(null);
-                    }
-                };
+                    asyncContinuation(null);
+                }
+            }
 
             lock (_openNetworkSenders)
             {
@@ -236,7 +253,7 @@ namespace NLog.Targets
                     // and invoke continuation at the very end
                     foreach (var openSender in _openNetworkSenders)
                     {
-                        openSender.FlushAsync(continuation);
+                        openSender.FlushAsync(Continuation);
                     }
                 }
             }
@@ -267,14 +284,23 @@ namespace NLog.Targets
         /// <param name="logEvent">The logging event.</param>
         protected override void Write(AsyncLogEventInfo logEvent)
         {
-            string address = Address.Render(logEvent.LogEvent);
-            InternalLogger.Trace("Sending to address:  '{0}'", address);
+            string address = RenderLogEvent(Address, logEvent.LogEvent);
+            InternalLogger.Trace("NetworkTarget(Name={0}): Sending to address: '{1}'", Name, address);
 
             byte[] bytes = GetBytesToWrite(logEvent.LogEvent);
 
             if (KeepConnection)
             {
-                var senderNode = GetCachedNetworkSender(address);
+                LinkedListNode<NetworkSender> senderNode;
+                try
+                {
+                    senderNode = GetCachedNetworkSender(address);
+                }
+                catch (Exception ex)
+                {
+                    InternalLogger.Error(ex, "NetworkTarget(Name={0}): Failed to create sender to address: '{1}'", Name, address);
+                    throw;
+                }
 
                 ChunkedSend(
                     senderNode.Value,
@@ -283,7 +309,7 @@ namespace NLog.Targets
                     {
                         if (ex != null)
                         {
-                            InternalLogger.Error(ex, "Error when sending.");
+                            InternalLogger.Error(ex, "NetworkTarget(Name={0}): Error when sending.", Name);
                             ReleaseCachedConnection(senderNode);
                         }
 
@@ -292,7 +318,6 @@ namespace NLog.Targets
             }
             else
             {
-
                 NetworkSender sender;
                 LinkedListNode<NetworkSender> linkedListNode;
 
@@ -306,29 +331,36 @@ namespace NLog.Targets
                         switch (OnConnectionOverflow)
                         {
                             case NetworkTargetConnectionsOverflowAction.DiscardMessage:
-                                InternalLogger.Warn("Discarding message otherwise to many connections.");
+                                InternalLogger.Warn("NetworkTarget(Name={0}): Discarding message otherwise to many connections.", Name);
                                 logEvent.Continuation(null);
                                 return;
 
                             case NetworkTargetConnectionsOverflowAction.AllowNewConnnection:
-                                InternalLogger.Debug("Too may connections, but this is allowed");
+                                InternalLogger.Debug("NetworkTarget(Name={0}): Too may connections, but this is allowed", Name);
                                 break;
 
                             case NetworkTargetConnectionsOverflowAction.Block:
                                 while (_openNetworkSenders.Count >= MaxConnections)
                                 {
-                                    InternalLogger.Debug("Blocking networktarget otherwhise too many connections.");
+                                    InternalLogger.Debug("NetworkTarget(Name={0}): Blocking networktarget otherwhise too many connections.", Name);
                                     Monitor.Wait(_openNetworkSenders);
-                                    InternalLogger.Trace("Entered critical section.");
+                                    InternalLogger.Trace("NetworkTarget(Name={0}): Entered critical section.", Name);
                                 }
 
-                                InternalLogger.Trace("Limit ok.");
+                                InternalLogger.Trace("NetworkTarget(Name={0}): Limit ok.", Name);
                                 break;
                         }
                     }
 
-                    sender = SenderFactory.Create(address, MaxQueueSize);
-                    sender.Initialize();
+                    try
+                    {
+                        sender = CreateNetworkSender(address);
+                    }
+                    catch (Exception ex)
+                    {
+                        InternalLogger.Error(ex, "NetworkTarget(Name={0}): Failed to create sender to address: '{1}'", Name, address);
+                        throw;
+                    }
 
                     linkedListNode = _openNetworkSenders.AddLast(sender);
                 }
@@ -348,13 +380,12 @@ namespace NLog.Targets
 
                         if (ex != null)
                         {
-                            InternalLogger.Error(ex, "Error when sending.");
+                            InternalLogger.Error(ex, "NetworkTarget(Name={0}): Error when sending.", Name);
                         }
 
                         sender.Close(ex2 => { });
                         logEvent.Continuation(ex);
                     });
-
             }
         }
 
@@ -382,31 +413,61 @@ namespace NLog.Targets
         /// <returns>Byte array.</returns>
         protected virtual byte[] GetBytesToWrite(LogEventInfo logEvent)
         {
-            string text;
-
-            var rendered = Layout.Render(logEvent);
-            InternalLogger.Trace("Sending: {0}", rendered);
-
-            if (NewLine)
+            if (OptimizeBufferReuse)
             {
-                text = rendered + LineEnding.NewLineCharacters;
+                if (!NewLine && logEvent.TryGetCachedLayoutValue(Layout, out var text))
+                {
+                    InternalLogger.Trace("NetworkTarget(Name={0}): Sending {1}", Name, text);
+                    return Encoding.GetBytes(text.ToString());
+                }
+                else
+                {
+                    using (var localBuilder = ReusableLayoutBuilder.Allocate())
+                    {
+                        Layout.RenderAppendBuilder(logEvent, localBuilder.Result, false);
+                        if (NewLine)
+                        {
+                            localBuilder.Result.Append(LineEnding.NewLineCharacters);
+                        }
+
+                        InternalLogger.Trace("NetworkTarget(Name={0}): Sending {1} chars", Name, localBuilder.Result.Length);
+
+                        using (var localBuffer = _reusableEncodingBuffer.Allocate())
+                        {
+#if !SILVERLIGHT
+                            if (localBuilder.Result.Length <= localBuffer.Result.Length)
+                            {
+                                localBuilder.Result.CopyTo(0, localBuffer.Result, 0, localBuilder.Result.Length);
+                                return Encoding.GetBytes(localBuffer.Result, 0, localBuilder.Result.Length);
+                            }
+                            else
+#endif
+                            {
+                                var rendered = localBuilder.Result.ToString();
+                                return Encoding.GetBytes(rendered);
+                            }
+                        }
+                    }
+                }
             }
             else
             {
-                text = rendered;
+                var rendered = Layout.Render(logEvent);
+                InternalLogger.Trace("NetworkTarget(Name={0}): Sending: {1}", Name, rendered);
+                if (NewLine)
+                {
+                    rendered += LineEnding.NewLineCharacters;
+                }
+                return Encoding.GetBytes(rendered);
             }
-
-            return Encoding.GetBytes(text);
         }
 
         private LinkedListNode<NetworkSender> GetCachedNetworkSender(string address)
         {
             lock (_currentSenderCache)
             {
-                LinkedListNode<NetworkSender> senderNode;
-
                 // already have address
-                if (_currentSenderCache.TryGetValue(address, out senderNode))
+                if (_currentSenderCache.TryGetValue(address, out var senderNode))
                 {
                     senderNode.Value.CheckSocket();
                     return senderNode;
@@ -434,8 +495,7 @@ namespace NLog.Targets
                     }
                 }
 
-                var sender = SenderFactory.Create(address, MaxQueueSize);
-                sender.Initialize();
+                NetworkSender sender = CreateNetworkSender(address);
                 lock (_openNetworkSenders)
                 {
                     senderNode = _openNetworkSenders.AddLast(sender);
@@ -446,6 +506,18 @@ namespace NLog.Targets
             }
         }
 
+        private NetworkSender CreateNetworkSender(string address)
+        {
+#if !SILVERLIGHT
+            var sender = SenderFactory.Create(address, MaxQueueSize, SslProtocols, TimeSpan.FromSeconds(KeepAliveTimeSeconds));
+#else
+            var sender = SenderFactory.Create(address, MaxQueueSize);
+#endif
+            sender.Initialize();
+
+            return sender;
+        }
+
         private void ReleaseCachedConnection(LinkedListNode<NetworkSender> senderNode)
         {
             lock (_currentSenderCache)
@@ -453,7 +525,6 @@ namespace NLog.Targets
                 var networkSender = senderNode.Value;
                 lock (_openNetworkSenders)
                 {
-
                     if (TryRemove(_openNetworkSenders, senderNode))
                     {
                         // only remove it once
@@ -461,15 +532,10 @@ namespace NLog.Targets
                     }
                 }
 
-                LinkedListNode<NetworkSender> sender2;
-
                 // make sure the current sender for this address is the one we want to remove
-                if (_currentSenderCache.TryGetValue(networkSender.Address, out sender2))
+                if (_currentSenderCache.TryGetValue(networkSender.Address, out var sender2) && ReferenceEquals(senderNode, sender2))
                 {
-                    if (ReferenceEquals(senderNode, sender2))
-                    {
-                        _currentSenderCache.Remove(networkSender.Address);
-                    }
+                    _currentSenderCache.Remove(networkSender.Address);
                 }
             }
         }
@@ -478,21 +544,31 @@ namespace NLog.Targets
         private void ChunkedSend(NetworkSender sender, byte[] buffer, AsyncContinuation continuation)
         {
             int tosend = buffer.Length;
-            int pos = 0;
-
-            AsyncContinuation sendNextChunk = null;
-
-           
-
-            sendNextChunk = ex =>
+            if (tosend <= MaxMessageSize)
+            {
+                // Chunking is not needed, no need to perform delegate capture
+                InternalLogger.Trace("NetworkTarget(Name={0}): Sending chunk, position: {1}, length: {2}", Name, 0, tosend);
+                if (tosend <= 0)
                 {
-                  
+                    continuation(null);
+                    return;
+                }
+
+                sender.Send(buffer, 0, tosend, continuation);
+            }
+            else
+            {
+                int pos = 0;
+
+                void SendNextChunk(Exception ex)
+                {
                     if (ex != null)
                     {
                         continuation(ex);
                         return;
                     }
-                    InternalLogger.Trace("Sending chunk, position: {0}, length: {1}", pos, tosend);
+
+                    InternalLogger.Trace("NetworkTarget(Name={0}): Sending chunk, position: {1}, length: {2}", Name, pos, tosend);
                     if (tosend <= 0)
                     {
                         continuation(null);
@@ -504,14 +580,14 @@ namespace NLog.Targets
                     {
                         if (OnOverflow == NetworkTargetOverflowAction.Discard)
                         {
-                            InternalLogger.Trace("discard because chunksize > this.MaxMessageSize");
+                            InternalLogger.Trace("NetworkTarget(Name={0}): Discard because chunksize > this.MaxMessageSize", Name);
                             continuation(null);
                             return;
                         }
 
                         if (OnOverflow == NetworkTargetOverflowAction.Error)
                         {
-                            continuation(new OverflowException("Attempted to send a message larger than MaxMessageSize (" + MaxMessageSize + "). Actual size was: " + buffer.Length + ". Adjust OnOverflow and MaxMessageSize parameters accordingly."));
+                            continuation(new OverflowException($"Attempted to send a message larger than MaxMessageSize ({MaxMessageSize}). Actual size was: {buffer.Length}. Adjust OnOverflow and MaxMessageSize parameters accordingly."));
                             return;
                         }
 
@@ -522,10 +598,11 @@ namespace NLog.Targets
                     tosend -= chunksize;
                     pos += chunksize;
 
-                    sender.Send(buffer, pos0, chunksize, sendNextChunk);
-                };
+                    sender.Send(buffer, pos0, chunksize, SendNextChunk);
+                }
 
-            sendNextChunk(null);
+                SendNextChunk(null);
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,26 +31,68 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 namespace NLog.Internal.Fakeables
 {
     internal class FakeAppDomain : IAppDomain
     {
+#if NETSTANDARD1_5
         System.Runtime.Loader.AssemblyLoadContext _defaultContext;
+#endif
 
         /// <summary>Initializes a new instance of the <see cref="T:System.Object" /> class.</summary>
         public FakeAppDomain()
         {
             BaseDirectory = AppContext.BaseDirectory;
+#if NETSTANDARD1_5
             _defaultContext = System.Runtime.Loader.AssemblyLoadContext.Default;
+
+            try
+            {
+                FriendlyName = GetFriendlyNameFromEntryAssembly() ?? GetFriendlyNameFromProcessName() ?? "UnknownAppDomain";
+            }
+            catch
+            {
+                FriendlyName = "UnknownAppDomain";
+            }
+#endif
         }
 
-        #region Implementation of IAppDomain
+#region Implementation of IAppDomain
+
+#if NETSTANDARD1_5
+        private static string GetFriendlyNameFromEntryAssembly()
+        {
+            try
+            {
+                string assemblyName =  Assembly.GetEntryAssembly()?.GetName()?.Name;
+                return string.IsNullOrEmpty(assemblyName) ? null : assemblyName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string GetFriendlyNameFromProcessName()
+        {
+            try
+            {
+                string processName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+                return string.IsNullOrEmpty(processName) ? null : processName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+#endif
 
         /// <summary>
         /// Gets or sets the base directory that the assembly resolver uses to probe for assemblies.
@@ -78,21 +120,34 @@ namespace NLog.Internal.Fakeables
         public int Id { get; set; }
 
         /// <summary>
+        /// Gets the assemblies that have been loaded into the execution context of this application domain.
+        /// </summary>
+        /// <returns>A list of assemblies in this application domain.</returns>
+        public IEnumerable<Assembly> GetAssemblies()
+        {
+            return Internal.ArrayHelper.Empty<Assembly>();  // TODO NETSTANDARD1_6 has DependencyContext.RuntimeLibraries
+        }
+
+        /// <summary>
         /// Process exit event.
         /// </summary>
         public event EventHandler<EventArgs> ProcessExit
         {
             add
             {
+#if NETSTANDARD1_5
                 if (_contextUnloadingEvent == null && _defaultContext != null)
                     _defaultContext.Unloading += OnContextUnloading;
                 _contextUnloadingEvent += value;
+#endif
             }
             remove
             {
+#if NETSTANDARD1_5
                 _contextUnloadingEvent -= value;
                 if (_contextUnloadingEvent == null && _defaultContext != null)
                     _defaultContext.Unloading -= OnContextUnloading;
+#endif
             }
         }
 
@@ -103,18 +158,23 @@ namespace NLog.Internal.Fakeables
         {
             add
             {
+#if NETSTANDARD1_5
                 if (_contextUnloadingEvent == null && _defaultContext != null)
                     _defaultContext.Unloading += OnContextUnloading;
                 _contextUnloadingEvent += value;
+#endif
             }
             remove
             {
+#if NETSTANDARD1_5
                 _contextUnloadingEvent -= value;
                 if (_contextUnloadingEvent == null && _defaultContext != null)
                     _defaultContext.Unloading -= OnContextUnloading;
+#endif
             }
         }
 
+#if NETSTANDARD1_5
         private event EventHandler<EventArgs> _contextUnloadingEvent;
 
         private void OnContextUnloading(System.Runtime.Loader.AssemblyLoadContext context)
@@ -122,15 +182,8 @@ namespace NLog.Internal.Fakeables
             var handler = _contextUnloadingEvent;
             if (handler != null) handler.Invoke(context, EventArgs.Empty);
         }
-        #endregion
-    }
-
-    static class ExtensionMethods
-    {
-        public static void Close(this IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
+#endif
+#endregion
     }
 }
 

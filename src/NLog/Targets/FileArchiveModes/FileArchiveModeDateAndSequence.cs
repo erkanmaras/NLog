@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -58,7 +58,7 @@ namespace NLog.Targets.FileArchiveModes
             _archiveDateFormat = archiveDateFormat;
         }
 
-        public override bool AttemptCleanupOnInitializeFile(string initializeFile, int maxArchiveFiles)
+        public override bool AttemptCleanupOnInitializeFile(string archiveFilePath, int maxArchiveFiles)
         {
             return false;   // For historic reasons, then cleanup of sequence archives are not done on startup
         }
@@ -66,13 +66,9 @@ namespace NLog.Targets.FileArchiveModes
         protected override DateAndSequenceArchive GenerateArchiveFileInfo(FileInfo archiveFile, FileNameTemplate fileTemplate)
         {
             //Get the archive file name or empty string if it's null
-            string archiveFileNameWithoutPath = Path.GetFileName(archiveFile.FullName) ?? "";
+            string archiveFileNameWithoutPath = Path.GetFileName(archiveFile.FullName) ?? string.Empty;
 
-            DateTime date;
-            int sequence;
-            if (
-                !TryParseDateAndSequence(archiveFileNameWithoutPath, _archiveDateFormat, fileTemplate, out date,
-                    out sequence))
+            if (!TryParseDateAndSequence(archiveFileNameWithoutPath, _archiveDateFormat, fileTemplate, out var date, out var sequence))
             {
                 return null;
             }
@@ -123,7 +119,7 @@ namespace NLog.Targets.FileArchiveModes
             int sequenceIndex = dateAndSequence.LastIndexOf('.') + 1;
 
             string sequencePart = dateAndSequence.Substring(sequenceIndex);
-            if (!Int32.TryParse(sequencePart, NumberStyles.None, CultureInfo.CurrentCulture, out sequence))
+            if (!int.TryParse(sequencePart, NumberStyles.None, CultureInfo.CurrentCulture, out sequence))
             {
                 date = default(DateTime);
                 return false;

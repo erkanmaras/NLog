@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,7 +37,7 @@ namespace NLog.Filters
     using System.Collections.Generic;
     using System.ComponentModel;
     using System.Text;
-    using Internal;
+    using NLog.Internal;
 
     /// <summary>
     /// Matches when the result of the calculated layout has been repeated a moment ago
@@ -50,12 +50,14 @@ namespace NLog.Filters
         /// <summary>
         /// How long before a filter expires, and logging is accepted again
         /// </summary>
+        /// <docgen category='Filtering Options' order='10' />
         [DefaultValue(10)]
         public int TimeoutSeconds { get; set; }
 
         /// <summary>
         /// Max length of filter values, will truncate if above limit
         /// </summary>
+        /// <docgen category='Filtering Options' order='10' />
         [DefaultValue(1000)]
         public int MaxLength { get; set; }
 
@@ -63,42 +65,49 @@ namespace NLog.Filters
         /// Applies the configured action to the initial logevent that starts the timeout period.
         /// Used to configure that it should ignore all events until timeout.
         /// </summary>
+        /// <docgen category='Filtering Options' order='10' />
         [DefaultValue(false)]
         public bool IncludeFirst { get; set; }
 
         /// <summary>
         /// Max number of unique filter values to expect simultaneously
         /// </summary>
+        /// <docgen category='Filtering Options' order='10' />
         [DefaultValue(50000)]
         public int MaxFilterCacheSize { get; set; }
 
         /// <summary>
         /// Default number of unique filter values to expect, will automatically increase if needed
         /// </summary>
+        /// <docgen category='Filtering Options' order='10' />
         [DefaultValue(1000)]
         public int DefaultFilterCacheSize { get; set; }
 
         /// <summary>
         /// Insert FilterCount value into <see cref="LogEventInfo.Properties"/> when an event is no longer filtered
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(null)]
         public string FilterCountPropertyName { get; set; }
 
         /// <summary>
         /// Append FilterCount to the <see cref="LogEventInfo.Message"/> when an event is no longer filtered
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(null)]
         public string FilterCountMessageAppendFormat { get; set; }
 
         /// <summary>
         /// Reuse internal buffers, and doesn't have to constantly allocate new buffers
         /// </summary>
+        /// <docgen category='Performance Options' order='10' />
         [DefaultValue(true)]
         public bool OptimizeBufferReuse { get; set; }
 
         /// <summary>
         /// Default buffer size for the internal buffers
         /// </summary>
+        /// <docgen category='Performance Options' order='10' />
         [DefaultValue(1000)]
         public int OptimizeBufferDefaultLength { get; set; }
 
@@ -111,7 +120,7 @@ namespace NLog.Filters
         private readonly Stack<KeyValuePair<FilterInfoKey, FilterInfo>> _objectPool = new Stack<KeyValuePair<FilterInfoKey, FilterInfo>>(1000);
 
         /// <summary>
-        /// Constructor
+        /// Initializes a new instance of the <see cref="WhenRepeatedFilter" /> class.
         /// </summary>
         public WhenRepeatedFilter()
         {
@@ -259,7 +268,7 @@ namespace NLog.Filters
         {
             if (targetBuilder != null)
             {
-                Layout.RenderAppendBuilder(logEvent, targetBuilder, false);
+                Layout.RenderAppendBuilder(logEvent, targetBuilder);
                 if (targetBuilder.Length > MaxLength)
                     targetBuilder.Length = MaxLength;
                 return new FilterInfoKey(targetBuilder, null);
@@ -289,14 +298,13 @@ namespace NLog.Filters
                 {
                     if (!string.IsNullOrEmpty(FilterCountPropertyName))
                     {
-                        object otherFilterCount;
-                        if (!logEvent.Properties.TryGetValue(FilterCountPropertyName, out otherFilterCount))
+                        if (!logEvent.Properties.TryGetValue(FilterCountPropertyName, out var otherFilterCount))
                         {
                             logEvent.Properties[FilterCountPropertyName] = filterCount;
                         }
-                        else if (otherFilterCount is int)
+                        else if (otherFilterCount is int i)
                         {
-                            filterCount = Math.Max((int)otherFilterCount, filterCount);
+                            filterCount = Math.Max(i, filterCount);
                             logEvent.Properties[FilterCountPropertyName] = filterCount;
                         }
                     }
@@ -405,27 +413,16 @@ namespace NLog.Filters
                     // StringBuilder.Equals only works when StringBuilder.Capacity is the same
                     if (_stringBuffer.Capacity != other._stringBuffer.Capacity)
                     {
-                        if (_stringBuffer.Length != other._stringBuffer.Length)
-                            return false;
-
-                        for (int x = 0; x < _stringBuffer.Length; ++x)
-                        {
-                            if (_stringBuffer[x] != other._stringBuffer[x])
-                            {
-                                return false;
-                            }
-                        }
-
-                        return true;
+                        return _stringBuffer.EqualTo(other._stringBuffer);
                     }
                     return _stringBuffer.Equals(other._stringBuffer);
                 }
                 return ReferenceEquals(_stringBuffer, other._stringBuffer) && ReferenceEquals(StringValue, other.StringValue);
             }
 
-            public override bool Equals(object other)
+            public override bool Equals(object obj)
             {
-                return other is FilterInfoKey && Equals((FilterInfoKey)other);
+                return obj is FilterInfoKey key && Equals(key);
             }
         }
     }

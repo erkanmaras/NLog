@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,7 +38,7 @@ namespace NLog.Internal.FileAppenders
     using System.IO;
     using System.Security;
 
-    using Common;
+    using NLog.Common;
 
     /// <summary>
     /// Optimized single-process file appender which keeps the file open for exclusive write.
@@ -49,6 +49,8 @@ namespace NLog.Internal.FileAppenders
         public static readonly IFileAppenderFactory TheFactory = new Factory();
 
         private FileStream _file;
+        private readonly bool _enableFileDeleteSimpleMonitor;
+        private DateTime _lastSimpleMonitorCheckTimeUtc;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SingleProcessFileAppender" /> class.
@@ -57,19 +59,9 @@ namespace NLog.Internal.FileAppenders
         /// <param name="parameters">The parameters.</param>
         public SingleProcessFileAppender(string fileName, ICreateFileParameters parameters) : base(fileName, parameters)
         {
-            if (CaptureLastWriteTime)
-            {
-                var fileInfo = new FileInfo(fileName);
-                if (fileInfo.Exists)
-                {
-                    FileTouched(fileInfo.GetLastWriteTimeUtc());
-                }
-                else
-                {
-                    FileTouched();
-                }
-            }
             _file = CreateFileStream(false);
+            _enableFileDeleteSimpleMonitor = parameters.EnableFileDeleteSimpleMonitor;
+            _lastSimpleMonitorCheckTimeUtc = OpenTimeUtc;
         }
 
         /// <summary>
@@ -85,12 +77,13 @@ namespace NLog.Internal.FileAppenders
                 return;
             }
 
-            _file.Write(bytes, offset, count);
-
-            if (CaptureLastWriteTime)
+            if (_enableFileDeleteSimpleMonitor && MonitorForEnableFileDeleteEvent(FileName, ref _lastSimpleMonitorCheckTimeUtc))
             {
-                FileTouched();
+                _file.Dispose();
+                _file = CreateFileStream(false);
             }
+
+            _file.Write(bytes, offset, count);
         }
 
         /// <summary>
@@ -104,7 +97,6 @@ namespace NLog.Internal.FileAppenders
             }
 
             _file.Flush();
-            FileTouched();
         }
 
         /// <summary>
@@ -126,7 +118,7 @@ namespace NLog.Internal.FileAppenders
             {
                 // Swallow exception as the file-stream now is in final state (broken instead of closed)
                 InternalLogger.Warn(ex, "Failed to close file '{0}'", FileName);
-                System.Threading.Thread.Sleep(1);   // Artificial delay to avoid hammering a bad file location
+                AsyncHelpers.WaitForDelay(TimeSpan.FromMilliseconds(1));    // Artificial delay to avoid hammering a bad file location
             }
             finally
             {
@@ -145,17 +137,7 @@ namespace NLog.Internal.FileAppenders
         }
 
         /// <summary>
-        /// Gets the last time the file associated with the appeander is written. The time returned is in Coordinated 
-        /// Universal Time [UTC] standard.
-        /// </summary>
-        /// <returns>The time the file was last written to.</returns>
-        public override DateTime? GetFileLastWriteTimeUtc()
-        {
-            return LastWriteTimeUtc;
-        }
-
-        /// <summary>
-        /// Gets the length in bytes of the file associated with the appeander.
+        /// Gets the length in bytes of the file associated with the appender.
         /// </summary>
         /// <returns>A long value representing the length of the file in bytes.</returns>
         public override long? GetFileLength()

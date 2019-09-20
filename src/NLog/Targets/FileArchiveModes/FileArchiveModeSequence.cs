@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -52,7 +52,7 @@ namespace NLog.Targets.FileArchiveModes
             _archiveDateFormat = archiveDateFormat;
         }
 
-        public override bool AttemptCleanupOnInitializeFile(string initializeFile, int maxArchiveFiles)
+        public override bool AttemptCleanupOnInitializeFile(string archiveFilePath, int maxArchiveFiles)
         {
             return false;   // For historic reasons, then cleanup of sequence archives are not done on startup
         }

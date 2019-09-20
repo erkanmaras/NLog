@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,14 +35,16 @@ namespace NLog.LayoutRenderers
 {
 #if !SILVERLIGHT
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
-    /// Mapped Diagnostic Logical Context item (based on CallContext).
+    /// Render a Mapped Diagnostic Logical Context item (based on CallContext).
+    /// See <see cref="MappedDiagnosticsLogicalContext"/>
     /// </summary>
     [LayoutRenderer("mdlc")]
-    public class MdlcLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class MdlcLayoutRenderer : LayoutRenderer, IStringValueRenderer
     {
         /// <summary>
         /// Gets or sets the name of the item.
@@ -53,16 +55,37 @@ namespace NLog.LayoutRenderers
         public string Item { get; set; }
 
         /// <summary>
-        /// Renders the specified MDLC item and appends it to the specified <see cref="StringBuilder" />.
+        /// Format string for conversion from object to string.
         /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <docgen category='Rendering Options' order='50' />
+        public string Format { get; set; }
+
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            //don't use MappedDiagnosticsLogicalContext.Get to ensure we are not locking the Factory (indirect by LogManager.Configuration).
-            var value = MappedDiagnosticsLogicalContext.GetObject(Item);
+            var value = GetValue();
             var formatProvider = GetFormatProvider(logEvent, null);
-            builder.AppendFormattedValue(value, null, formatProvider);
+            builder.AppendFormattedValue(value, Format, formatProvider);
+        }
+        
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => GetStringValue(logEvent);
+
+        private string GetStringValue(LogEventInfo logEvent)
+        {
+            if (Format != MessageTemplates.ValueFormatter.FormatAsJson)
+            {
+                object value = GetValue();
+                string stringValue = FormatHelper.TryFormatToString(value, Format, GetFormatProvider(logEvent, null));
+                return stringValue;
+            }
+            return null;
+        }
+
+        private object GetValue()
+        {
+            //don't use MappedDiagnosticsLogicalContext.Get to ensure we are not locking the Factory (indirect by LogManager.Configuration).
+            return MappedDiagnosticsLogicalContext.GetObject(Item);
         }
     }
 #endif

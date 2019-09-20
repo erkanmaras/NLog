@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,12 +34,13 @@
 namespace NLog.Layouts
 {
     using System;
-    using System.Linq;
+    using System.Collections.Generic;
     using System.ComponentModel;
+    using System.Linq;
     using System.Text;
-    using Config;
-    using Internal;
-    using Common;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Common;
 
     /// <summary>
     /// Abstract interface that layouts must implement.
@@ -51,7 +52,7 @@ namespace NLog.Layouts
         /// <summary>
         /// Is this layout initialized? See <see cref="Initialize(NLog.Config.LoggingConfiguration)"/>
         /// </summary>
-        private bool _isInitialized;
+        internal bool IsInitialized;
         private bool _scannedForObjects;
 
         /// <summary>
@@ -64,6 +65,10 @@ namespace NLog.Layouts
         /// Thread-agnostic layouts only use contents of <see cref="LogEventInfo"/> for its output.
         /// </remarks>
         internal bool ThreadAgnostic { get; set; }
+
+        internal bool ThreadSafe { get; set; }
+
+        internal bool MutableUnsafe { get; set; }
 
         /// <summary>
         /// Gets the level of stack trace information required for rendering.
@@ -113,7 +118,7 @@ namespace NLog.Layouts
         /// Precalculates the layout for the specified log event and stores the result
         /// in per-log event cache.
         /// 
-        /// Only if the layout doesn't have [ThreadAgnostic] and doens't contain layouts with [ThreadAgnostic]. 
+        /// Only if the layout doesn't have [ThreadAgnostic] and doesn't contain layouts with [ThreadAgnostic]. 
         /// </summary>
         /// <param name="logEvent">The log event.</param>
         /// <remarks>
@@ -123,7 +128,7 @@ namespace NLog.Layouts
         /// </remarks>
         public virtual void Precalculate(LogEventInfo logEvent)
         {
-            if (!ThreadAgnostic)
+            if (!ThreadAgnostic || MutableUnsafe)
             {
                 Render(logEvent);
             }
@@ -136,41 +141,55 @@ namespace NLog.Layouts
         /// <returns>String representing log event.</returns>
         public string Render(LogEventInfo logEvent)
         {
-            if (!_isInitialized)
+            if (!IsInitialized)
             {
                 Initialize(LoggingConfiguration);
             }
 
-            return GetFormattedMessage(logEvent);
+            if (!ThreadAgnostic || MutableUnsafe)
+            {
+                object cachedValue;
+                if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
+                {
+                    return cachedValue?.ToString() ?? string.Empty;
+                }
+            }
+
+            string layoutValue = GetFormattedMessage(logEvent) ?? string.Empty;
+            if (!ThreadAgnostic || MutableUnsafe)
+            {
+                // Would be nice to only do this in Precalculate(), but we need to ensure internal cache
+                // is updated for for custom Layouts that overrides Precalculate (without calling base.Precalculate)
+                logEvent.AddCachedLayoutValue(this, layoutValue);
+            }
+            return layoutValue;
         }
 
-        internal void PrecalculateBuilder(LogEventInfo logEvent, StringBuilder target)
+        internal virtual void PrecalculateBuilder(LogEventInfo logEvent, StringBuilder target)
         {
-            if (!ThreadAgnostic)
-            {
-                RenderAppendBuilder(logEvent, target, true);
-            }
+            Precalculate(logEvent); // Allow custom Layouts to work with OptimizeBufferReuse
         }
 
         /// <summary>
-        /// Renders the event info in layout to the provided target
+        /// Optimized version of <see cref="Render(LogEventInfo)"/> for internal Layouts. Works best
+        /// when override of <see cref="RenderFormattedMessage(LogEventInfo, StringBuilder)"/> is available.
         /// </summary>
         /// <param name="logEvent">The event info.</param>
         /// <param name="target">Appends the string representing log event to target</param>
         /// <param name="cacheLayoutResult">Should rendering result be cached on LogEventInfo</param>
         internal void RenderAppendBuilder(LogEventInfo logEvent, StringBuilder target, bool cacheLayoutResult = false)
         {
-            if (!_isInitialized)
+            if (!IsInitialized)
             {
                 Initialize(LoggingConfiguration);
             }
 
-            if (!ThreadAgnostic)
+            if (!ThreadAgnostic || MutableUnsafe)
             {
-                string cachedValue;
+                object cachedValue;
                 if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
                 {
-                    target.Append(cachedValue);
+                    target.Append(cachedValue?.ToString() ?? string.Empty);
                     return;
                 }
             }
@@ -192,19 +211,9 @@ namespace NLog.Layouts
         /// </summary>
         /// <param name="logEvent">The logging event.</param>
         /// <param name="reusableBuilder">StringBuilder to help minimize allocations [optional].</param>
-        /// <param name="cacheLayoutResult">Should rendering result be cached on LogEventInfo</param>
         /// <returns>The rendered layout.</returns>
-        internal string RenderAllocateBuilder(LogEventInfo logEvent, StringBuilder reusableBuilder = null, bool cacheLayoutResult = true)
+        internal string RenderAllocateBuilder(LogEventInfo logEvent, StringBuilder reusableBuilder = null)
         {
-            if (!ThreadAgnostic)
-            {
-                string cachedValue;
-                if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
-                {
-                    return cachedValue;
-                }
-            }
-
             int initialLength = _maxRenderedLength;
             if (initialLength > MaxInitialRenderBufferLength)
             {
@@ -218,14 +227,7 @@ namespace NLog.Layouts
                 _maxRenderedLength = sb.Length;
             }
 
-            if (cacheLayoutResult && !ThreadAgnostic)
-            {
-                return logEvent.AddCachedLayoutValue(this, sb.ToString());
-            }
-            else
-            {
-                return sb.ToString();
-            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -261,10 +263,10 @@ namespace NLog.Layouts
         /// <param name="configuration">The configuration.</param>
         internal void Initialize(LoggingConfiguration configuration)
         {
-            if (!_isInitialized)
+            if (!IsInitialized)
             {
                 LoggingConfiguration = configuration;
-                _isInitialized = true;
+                IsInitialized = true;
                 _scannedForObjects = false;
 
                 InitializeLayout();
@@ -279,16 +281,18 @@ namespace NLog.Layouts
 
         internal void PerformObjectScanning()
         {
-            var objectGraphScannerList = ObjectGraphScanner.FindReachableObjects<object>(this);
+            var objectGraphScannerList = ObjectGraphScanner.FindReachableObjects<object>(true, this);
 
             // determine whether the layout is thread-agnostic
             // layout is thread agnostic if it is thread-agnostic and 
             // all its nested objects are thread-agnostic.
             ThreadAgnostic = objectGraphScannerList.All(item => item.GetType().IsDefined(typeof(ThreadAgnosticAttribute), true));
+            ThreadSafe = objectGraphScannerList.All(item => item.GetType().IsDefined(typeof(ThreadSafeAttribute), true));
+            MutableUnsafe = objectGraphScannerList.Any(item => item.GetType().IsDefined(typeof(MutableUnsafeAttribute), true));
 
             // determine the max StackTraceUsage, to decide if Logger needs to capture callsite
-            StackTraceUsage = StackTraceUsage.None;    // Incase this Layout should implement IStackTraceUsage
-            StackTraceUsage = objectGraphScannerList.OfType<IUsesStackTrace>().DefaultIfEmpty().Max(item => item == null ? StackTraceUsage.None : item.StackTraceUsage);
+            StackTraceUsage = StackTraceUsage.None;    // In case this Layout should implement IUsesStackTrace
+            StackTraceUsage = objectGraphScannerList.OfType<IUsesStackTrace>().DefaultIfEmpty().Max(item => item?.StackTraceUsage ?? StackTraceUsage.None);
 
             _scannedForObjects = true;
         }
@@ -298,10 +302,10 @@ namespace NLog.Layouts
         /// </summary>
         internal void Close()
         {
-            if (_isInitialized)
+            if (IsInitialized)
             {
                 LoggingConfiguration = null;
-                _isInitialized = false;
+                IsInitialized = false;
                 CloseLayout();
             }
         }
@@ -331,7 +335,7 @@ namespace NLog.Layouts
         /// <summary>
         /// Register a custom Layout.
         /// </summary>
-        /// <remarks>Short-cut for registing to default <see cref="ConfigurationItemFactory"/></remarks>
+        /// <remarks>Short-cut for registering to default <see cref="ConfigurationItemFactory"/></remarks>
         /// <typeparam name="T"> Type of the Layout.</typeparam>
         /// <param name="name"> Name of the Layout.</param>
         public static void Register<T>(string name)
@@ -344,13 +348,47 @@ namespace NLog.Layouts
         /// <summary>
         /// Register a custom Layout.
         /// </summary>
-        /// <remarks>Short-cut for registing to default <see cref="ConfigurationItemFactory"/></remarks>
+        /// <remarks>Short-cut for registering to default <see cref="ConfigurationItemFactory"/></remarks>
         /// <param name="layoutType"> Type of the Layout.</param>
         /// <param name="name"> Name of the Layout.</param>
         public static void Register(string name, Type layoutType)
         {
             ConfigurationItemFactory.Default.Layouts
                 .RegisterDefinition(name, layoutType);
+        }
+
+        /// <summary>
+        /// Optimized version of <see cref="Precalculate(LogEventInfo)"/> for internal Layouts, when
+        /// override of <see cref="RenderFormattedMessage(LogEventInfo, StringBuilder)"/> is available.
+        /// </summary>
+        internal void PrecalculateBuilderInternal(LogEventInfo logEvent, StringBuilder target)
+        {
+            if (!ThreadAgnostic || MutableUnsafe)
+            {
+                RenderAppendBuilder(logEvent, target, true);
+            }
+        }
+
+        internal string ToStringWithNestedItems<T>(IList<T> nestedItems, Func<T, string> nextItemToString)
+        {
+            if (nestedItems?.Count > 0)
+            {
+                var nestedNames = nestedItems.Select(c => nextItemToString(c)).ToArray();
+                return string.Concat(GetType().Name, "=", string.Join("|", nestedNames));
+            }
+            return base.ToString();
+        }
+
+        /// <summary>
+        /// Try get value
+        /// </summary>
+        /// <param name="logEvent"></param>
+        /// <param name="rawValue">rawValue if return result is true</param>
+        /// <returns>false if we could not determine the rawValue</returns>
+        internal virtual bool TryGetRawValue(LogEventInfo logEvent, out object rawValue)
+        {
+            rawValue = null;
+            return false;
         }
     }
 }

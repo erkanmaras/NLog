@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__ANDROID__ && !__IOS__
+#if !SILVERLIGHT && !__ANDROID__ && !__IOS__ && !NETSTANDARD1_3
 // Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) 
 #define SupportsMutex
 #endif
@@ -43,15 +43,16 @@ namespace NLog.Internal.FileAppenders
     using System.Security;
     using System.Threading;
     using System.Text;
+    using JetBrains.Annotations;
 
 #if SupportsMutex
-#if !NETSTANDARD1_5
+#if !NETSTANDARD
     using System.Security.AccessControl;
-#endif
     using System.Security.Principal;
-    using System.Security.Cryptography;
-    using Common;
 #endif
+    using System.Security.Cryptography;
+#endif
+    using Common;
 
     /// <summary>
     /// Base class for optimized file appenders which require the usage of a mutex. 
@@ -70,9 +71,19 @@ namespace NLog.Internal.FileAppenders
         protected BaseMutexFileAppender(string fileName, ICreateFileParameters createParameters)
             : base(fileName, createParameters)
         {
+            if (createParameters.IsArchivingEnabled && createParameters.ConcurrentWrites)
+            {
+                if (PlatformDetector.SupportsSharableMutex)
+                {
 #if SupportsMutex
-            ArchiveMutex = CreateArchiveMutex();
+                    ArchiveMutex = CreateArchiveMutex();
 #endif
+                }
+                else
+                {
+                    InternalLogger.Debug("Mutex for file archive not supported");
+                }
+            }
         }
 
 #if SupportsMutex
@@ -80,6 +91,7 @@ namespace NLog.Internal.FileAppenders
         /// Gets the mutually-exclusive lock for archiving files.
         /// </summary>
         /// <value>The mutex for archiving.</value>
+        [CanBeNull]
         public Mutex ArchiveMutex { get; private set; }
 
         private Mutex CreateArchiveMutex()
@@ -88,9 +100,17 @@ namespace NLog.Internal.FileAppenders
             {
                 return CreateSharableMutex("FileArchiveLock");
             }
-            catch (SecurityException ex)
+            catch (Exception ex)
             {
-                InternalLogger.Warn(ex, "Failed to create global archive mutex: {0}", FileName);
+                if (ex is SecurityException || ex is UnauthorizedAccessException || ex is NotSupportedException || ex is NotImplementedException || ex is PlatformNotSupportedException)
+                {
+                    InternalLogger.Warn(ex, "Failed to create global archive mutex: {0}", FileName);
+                    return new Mutex();
+                }
+
+                InternalLogger.Error(ex, "Failed to create global archive mutex: {0}", FileName);
+                if (ex.MustBeRethrown())
+                    throw;
                 return new Mutex();
             }
         }
@@ -104,8 +124,7 @@ namespace NLog.Internal.FileAppenders
             base.Dispose(disposing);
             if (disposing)
             {
-                if (ArchiveMutex != null)
-                    ArchiveMutex.Close();    // Only closed on dispose, Mutex must survieve, when closing FileAppender before archive
+                ArchiveMutex?.Close();    // Only closed on dispose, Mutex must survive, when closing FileAppender before archive
             }
         }
 
@@ -117,10 +136,15 @@ namespace NLog.Internal.FileAppenders
         protected Mutex CreateSharableMutex(string mutexNamePrefix)
         {
             if (!PlatformDetector.SupportsSharableMutex)
-                return new Mutex();
+                throw new NotSupportedException("Creating Mutex not supported");
 
             var name = GetMutexName(mutexNamePrefix);
 
+            return ForceCreateSharableMutex(name);
+        }
+
+        internal static Mutex ForceCreateSharableMutex(string name)
+        {
 #if !NETSTANDARD
             // Creates a mutex sharable by more than one process
             var mutexSecurity = new MutexSecurity();
@@ -129,8 +153,7 @@ namespace NLog.Internal.FileAppenders
 
             // The constructor will either create new mutex or open
             // an existing one, in a thread-safe manner
-            bool createdNew;
-            return new Mutex(false, name, out createdNew, mutexSecurity);
+            return new Mutex(false, name, out _, mutexSecurity);
 #else
             //Mutex with 4 args has keyword "unsafe"
             return new Mutex(false, name);

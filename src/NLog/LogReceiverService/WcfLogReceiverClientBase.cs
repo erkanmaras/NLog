@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -124,12 +124,7 @@ namespace NLog.LogReceiverService
             get
             {
                 var httpCookieContainerManager = InnerChannel.GetProperty<IHttpCookieContainerManager>();
-                if (httpCookieContainerManager != null)
-                {
-                    return httpCookieContainerManager.CookieContainer;
-                }
-
-                return null;
+                return httpCookieContainerManager?.CookieContainer;
             }
             set
             {

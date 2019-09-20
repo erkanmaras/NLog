@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,7 +40,6 @@ namespace NLog.Config
     using System.Xml;
     using Internal.Fakeables;
     using Common;
-    using Internal;
 
     /// <summary>
     /// NLog configuration section handler class for configuring NLog from App.config.
@@ -53,7 +52,7 @@ namespace NLog.Config
             {
                 string configFileName = appDomain.ConfigurationFile;
 
-                return new XmlLoggingConfiguration((XmlElement)section, configFileName);
+                return new XmlLoggingConfiguration(section.OuterXml, configFileName, LogManager.LogFactory);
             }
             catch (Exception exception)
             {

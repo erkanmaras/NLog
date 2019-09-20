@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -46,37 +46,55 @@ namespace NLog
         /// Gets a value indicating whether logging is enabled for the <c>Trace</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Trace</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsTraceEnabled => _isTraceEnabled;
+        public bool IsTraceEnabled
+        {
+            get { return _contextLogger._isTraceEnabled; }
+        }
 
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c>Debug</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Debug</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsDebugEnabled => _isDebugEnabled;
+        public bool IsDebugEnabled
+        {
+            get { return _contextLogger._isDebugEnabled; }
+        }
 
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c>Info</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Info</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsInfoEnabled => _isInfoEnabled;
+        public bool IsInfoEnabled
+        {
+            get { return _contextLogger._isInfoEnabled; }
+        }
 
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c>Warn</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Warn</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsWarnEnabled => _isWarnEnabled;
+        public bool IsWarnEnabled
+        {
+            get { return _contextLogger._isWarnEnabled; }
+        }
 
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c>Error</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Error</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsErrorEnabled => _isErrorEnabled;
+        public bool IsErrorEnabled
+        {
+            get { return _contextLogger._isErrorEnabled; }
+        }
 
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c>Fatal</c> level.
         /// </summary>
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c>Fatal</c> level, otherwise it returns <see langword="false" />.</returns>
-        public bool IsFatalEnabled => _isFatalEnabled;
+        public bool IsFatalEnabled
+        {
+            get { return _contextLogger._isFatalEnabled; }
+        }
 
 
         #region Trace() overloads 
@@ -121,7 +139,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Trace, null, messageFunc());
@@ -146,7 +164,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsTraceEnabled)
@@ -172,7 +190,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace([Localizable(false)] string message, params object[] args) 
         { 
             if (IsTraceEnabled)
@@ -192,7 +210,7 @@ namespace NLog
         {
             if (IsTraceEnabled)
             {
-                WriteToTargets(LogLevel.Trace, message, exception);
+                WriteToTargets(LogLevel.Trace, exception, message, null);
             }
         }
 
@@ -215,6 +233,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Trace(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsTraceEnabled)
@@ -230,7 +249,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsTraceEnabled)
@@ -246,7 +265,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsTraceEnabled)
@@ -261,27 +280,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsTraceEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Trace(message, exceptionCandidate);	
+                        Trace(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -298,7 +314,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsTraceEnabled)
@@ -315,7 +331,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsTraceEnabled)
@@ -335,7 +351,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsTraceEnabled)
@@ -354,7 +370,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Trace<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsTraceEnabled)
@@ -407,7 +423,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Debug, null, messageFunc());
@@ -432,7 +448,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsDebugEnabled)
@@ -458,7 +474,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug([Localizable(false)] string message, params object[] args) 
         { 
             if (IsDebugEnabled)
@@ -478,7 +494,7 @@ namespace NLog
         {
             if (IsDebugEnabled)
             {
-                WriteToTargets(LogLevel.Debug, message, exception);
+                WriteToTargets(LogLevel.Debug, exception, message, null);
             }
         }
 
@@ -501,6 +517,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Debug(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsDebugEnabled)
@@ -516,7 +533,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsDebugEnabled)
@@ -532,7 +549,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsDebugEnabled)
@@ -547,27 +564,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsDebugEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Debug(message, exceptionCandidate);	
+                        Debug(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -584,7 +598,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsDebugEnabled)
@@ -601,7 +615,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsDebugEnabled)
@@ -621,7 +635,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsDebugEnabled)
@@ -640,7 +654,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Debug<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsDebugEnabled)
@@ -693,7 +707,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Info, null, messageFunc());
@@ -718,7 +732,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsInfoEnabled)
@@ -744,7 +758,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info([Localizable(false)] string message, params object[] args) 
         { 
             if (IsInfoEnabled)
@@ -764,7 +778,7 @@ namespace NLog
         {
             if (IsInfoEnabled)
             {
-                WriteToTargets(LogLevel.Info, message, exception);
+                WriteToTargets(LogLevel.Info, exception, message, null);
             }
         }
 
@@ -787,6 +801,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Info(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsInfoEnabled)
@@ -802,7 +817,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsInfoEnabled)
@@ -818,7 +833,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsInfoEnabled)
@@ -833,27 +848,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsInfoEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Info(message, exceptionCandidate);	
+                        Info(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -870,7 +882,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsInfoEnabled)
@@ -887,7 +899,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsInfoEnabled)
@@ -907,7 +919,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsInfoEnabled)
@@ -926,7 +938,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Info<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsInfoEnabled)
@@ -979,7 +991,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Warn, null, messageFunc());
@@ -1004,7 +1016,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsWarnEnabled)
@@ -1030,7 +1042,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn([Localizable(false)] string message, params object[] args) 
         { 
             if (IsWarnEnabled)
@@ -1050,7 +1062,7 @@ namespace NLog
         {
             if (IsWarnEnabled)
             {
-                WriteToTargets(LogLevel.Warn, message, exception);
+                WriteToTargets(LogLevel.Warn, exception, message, null);
             }
         }
 
@@ -1073,6 +1085,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Warn(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsWarnEnabled)
@@ -1088,7 +1101,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsWarnEnabled)
@@ -1104,7 +1117,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsWarnEnabled)
@@ -1119,27 +1132,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsWarnEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Warn(message, exceptionCandidate);	
+                        Warn(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -1156,7 +1166,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsWarnEnabled)
@@ -1173,7 +1183,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsWarnEnabled)
@@ -1193,7 +1203,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsWarnEnabled)
@@ -1212,7 +1222,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Warn<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsWarnEnabled)
@@ -1265,7 +1275,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Error, null, messageFunc());
@@ -1290,7 +1300,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsErrorEnabled)
@@ -1316,7 +1326,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error([Localizable(false)] string message, params object[] args) 
         { 
             if (IsErrorEnabled)
@@ -1336,7 +1346,7 @@ namespace NLog
         {
             if (IsErrorEnabled)
             {
-                WriteToTargets(LogLevel.Error, message, exception);
+                WriteToTargets(LogLevel.Error, exception, message, null);
             }
         }
 
@@ -1359,6 +1369,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Error(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsErrorEnabled)
@@ -1374,7 +1385,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsErrorEnabled)
@@ -1390,7 +1401,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsErrorEnabled)
@@ -1405,27 +1416,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsErrorEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Error(message, exceptionCandidate);	
+                        Error(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -1442,7 +1450,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsErrorEnabled)
@@ -1459,7 +1467,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsErrorEnabled)
@@ -1479,7 +1487,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsErrorEnabled)
@@ -1498,7 +1506,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Error<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsErrorEnabled)
@@ -1551,7 +1559,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.Fatal, null, messageFunc());
@@ -1576,7 +1584,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (IsFatalEnabled)
@@ -1602,7 +1610,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal([Localizable(false)] string message, params object[] args) 
         { 
             if (IsFatalEnabled)
@@ -1622,7 +1630,7 @@ namespace NLog
         {
             if (IsFatalEnabled)
             {
-                WriteToTargets(LogLevel.Fatal, message, exception);
+                WriteToTargets(LogLevel.Fatal, exception, message, null);
             }
         }
 
@@ -1645,6 +1653,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Fatal(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsFatalEnabled)
@@ -1660,7 +1669,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsFatalEnabled)
@@ -1676,7 +1685,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (IsFatalEnabled)
@@ -1691,27 +1700,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (IsFatalEnabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        Fatal(message, exceptionCandidate);	
+                        Fatal(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -1728,7 +1734,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (IsFatalEnabled)
@@ -1745,7 +1751,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (IsFatalEnabled)
@@ -1765,7 +1771,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (IsFatalEnabled)
@@ -1784,7 +1790,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Fatal<TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (IsFatalEnabled)

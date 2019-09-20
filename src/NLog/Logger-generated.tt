@@ -8,7 +8,7 @@
     //Generation of overloads of all six levels
     //T4 templates are built in Visual Studio. See https://msdn.microsoft.com/en-us/library/bb126445.aspx
 #>// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -55,7 +55,7 @@ namespace NLog
     var levels = new string[]{"Trace", "Debug", "Info", "Warn", "Error", "Fatal"};
 
     foreach(var level in levels)
-    { 
+    {
 #>
         /// <summary>
         /// Gets a value indicating whether logging is enabled for the <c><#=level#></c> level.
@@ -63,17 +63,14 @@ namespace NLog
         /// <returns>A value of <see langword="true" /> if logging is enabled for the <c><#=level#></c> level, otherwise it returns <see langword="false" />.</returns>
         public bool Is<#=level#>Enabled
         {
-            get { return _is<#=level#>Enabled; }
+            get { return _contextLogger._is<#=level#>Enabled; }
         }
 
 <#
-
     }
 
     foreach(var level in levels)
-    { 
-
-
+    {
 #>
 
         #region <#=level#>() overloads 
@@ -118,7 +115,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(LogLevel.<#=level#>, null, messageFunc());
@@ -143,7 +140,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#>(IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         { 
             if (Is<#=level#>Enabled)
@@ -169,7 +166,7 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#>([Localizable(false)] string message, params object[] args) 
         { 
             if (Is<#=level#>Enabled)
@@ -189,7 +186,7 @@ namespace NLog
         {
             if (Is<#=level#>Enabled)
             {
-                WriteToTargets(LogLevel.<#=level#>, message, exception);
+                WriteToTargets(LogLevel.<#=level#>, exception, message, null);
             }
         }
 
@@ -212,6 +209,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#>(Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (Is<#=level#>Enabled)
@@ -227,7 +225,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#>(Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (Is<#=level#>Enabled)
@@ -243,7 +241,7 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
         { 
             if (Is<#=level#>Enabled)
@@ -258,27 +256,24 @@ namespace NLog
         /// <typeparam name="TArgument">The type of the argument.</typeparam>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument>([Localizable(false)] string message, TArgument argument)
         { 
             if (Is<#=level#>Enabled)
             {
 #pragma warning disable 618
-           
-            //todo log also these calls as warning?
                 if (_configuration.ExceptionLoggingOldStyle)
 #pragma warning restore 618
-                {   
-                    var exceptionCandidate = argument as Exception;		
-                    if (exceptionCandidate != null)		
+                {
+                    var exceptionCandidate = argument as Exception;
+                    if (exceptionCandidate != null)
                     {
-
                         // ReSharper disable CSharpWarnings::CS0618
                         #pragma warning disable 618
-                        <#=level#>(message, exceptionCandidate);	
+                        <#=level#>(message, exceptionCandidate);
                         #pragma warning restore 618
-                        // ReSharper restore CSharpWarnings::CS0618	
-                        return;		
+                        // ReSharper restore CSharpWarnings::CS0618
+                        return;
                     }
                 }
 
@@ -295,7 +290,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument1, TArgument2>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
         { 
             if (Is<#=level#>Enabled)
@@ -312,7 +307,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument1, TArgument2>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
         { 
             if (Is<#=level#>Enabled)
@@ -332,7 +327,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument1, TArgument2, TArgument3>(IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
         { 
             if (Is<#=level#>Enabled)
@@ -351,7 +346,7 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void <#=level#><TArgument1, TArgument2, TArgument3>([Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
         { 
             if (Is<#=level#>Enabled)

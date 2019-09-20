@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,12 +37,11 @@ namespace NLog
     using System.Collections.Generic;
     using System.Linq;
 
-    using Internal;
+    using NLog.Internal;
 
     /// <summary>
     /// Nested Diagnostics Context - a thread-local structure that keeps a stack
     /// of strings and provides methods to output them in layouts
-    /// Mostly for compatibility with log4net.
     /// </summary>
     public static class NestedDiagnosticsContext
     {
@@ -58,16 +57,12 @@ namespace NLog
         /// Gets the top NDC object but doesn't remove it.
         /// </summary>
         /// <returns>The object at the top of the NDC stack if defined; otherwise <c>null</c>.</returns>
-        public static object TopObject
-        {
-            get 
-            {
-                Stack<object> stack = ThreadStack;
-                return (stack.Count > 0) ? stack.Peek() : null;
-            }
-        }
+        public static object TopObject => PeekObject();
 
-        private static Stack<object> ThreadStack => ThreadLocalStorageHelper.GetDataForSlot<Stack<object>>(dataSlot);
+        private static Stack<object> GetThreadStack(bool create = true)
+        {
+            return ThreadLocalStorageHelper.GetDataForSlot<Stack<object>>(dataSlot, create);
+        }
 
         /// <summary>
         /// Pushes the specified text on current thread NDC.
@@ -86,7 +81,7 @@ namespace NLog
         /// <returns>An instance of the object that implements IDisposable that returns the stack to the previous level when IDisposable.Dispose() is called. To be used with C# using() statement.</returns>
         public static IDisposable Push(object value)
         {
-            Stack<object> stack = ThreadStack;
+            Stack<object> stack = GetThreadStack(true);
             int previousCount = stack.Count;
             stack.Push(value);
             return new StackPopper(stack, previousCount);
@@ -108,7 +103,7 @@ namespace NLog
         /// <returns>The top message, which is removed from the stack, as a string value.</returns>
         public static string Pop(IFormatProvider formatProvider)
         {
-            return FormatHelper.ConvertToString(PopObject(), formatProvider);
+            return FormatHelper.ConvertToString(PopObject() ?? string.Empty, formatProvider);
         }
 
         /// <summary>
@@ -117,8 +112,18 @@ namespace NLog
         /// <returns>The object from the top of the NDC stack, if defined; otherwise <c>null</c>.</returns>
         public static object PopObject()
         {
-            Stack<object> stack = ThreadStack;
+            Stack<object> stack = GetThreadStack(true);
             return (stack.Count > 0) ? stack.Pop() : null;
+        }
+
+        /// <summary>
+        /// Peeks the first object on the NDC stack
+        /// </summary>
+        /// <returns>The object from the top of the NDC stack, if defined; otherwise <c>null</c>.</returns>
+        public static object PeekObject()
+        {
+            Stack<object> stack = GetThreadStack(false);
+            return (stack?.Count > 0) ? stack.Peek() : null;
         }
 
         /// <summary>
@@ -126,7 +131,8 @@ namespace NLog
         /// </summary>
         public static void Clear()
         {
-            ThreadStack.Clear();
+            Stack<object> stack = GetThreadStack(false);
+            stack?.Clear();
         }
 
         /// <summary>
@@ -145,7 +151,11 @@ namespace NLog
         /// <returns>Array of strings.</returns>
         public static string[] GetAllMessages(IFormatProvider formatProvider) 
         {
-            return ThreadStack.Select((o) => FormatHelper.ConvertToString(o, formatProvider)).ToArray();
+            Stack<object> stack = GetThreadStack(false);
+            if (stack == null)
+                return ArrayHelper.Empty<string>();
+            else
+                return stack.Select((o) => FormatHelper.ConvertToString(o, formatProvider)).ToArray();
         }
 
         /// <summary>
@@ -154,7 +164,11 @@ namespace NLog
         /// <returns>Array of objects on the stack.</returns>
         public static object[] GetAllObjects() 
         {
-            return ThreadStack.ToArray();
+            Stack<object> stack = GetThreadStack(false);
+            if (stack == null)
+                return ArrayHelper.Empty<object>();
+            else
+                return stack.ToArray();
         }
 
         /// <summary>
@@ -162,8 +176,8 @@ namespace NLog
         /// </summary>
         private class StackPopper : IDisposable
         {
-            private Stack<object> _stack;
-            private int _previousCount;
+            private readonly Stack<object> _stack;
+            private readonly int _previousCount;
 
             /// <summary>
             /// Initializes a new instance of the <see cref="StackPopper" /> class.

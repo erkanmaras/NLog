@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,6 +38,12 @@ namespace NLog.Config
     /// <summary>
     /// Identifies that the output of layout or layout render does not change for the lifetime of the current appdomain.
     /// </summary>
+    /// <remarks>
+    /// A layout(renderer) could be converted to a literal when:
+    ///  - The layout and all layout properties are SimpleLayout or [AppDomainFixedOutput]
+    /// 
+    /// Recommendation: Apply this attribute to a layout or layout-renderer which have the result only changes by properties of type Layout.
+    /// </remarks>
     [AttributeUsage(AttributeTargets.Class)]
     public sealed class AppDomainFixedOutputAttribute : Attribute
     {

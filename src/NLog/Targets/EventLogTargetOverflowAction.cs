@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -32,7 +32,7 @@
 // 
 
 
-#if !SILVERLIGHT && !NETSTANDARD
+#if !SILVERLIGHT && (!NETSTANDARD || WindowsEventLogPackage)
 
 namespace NLog.Targets
 {

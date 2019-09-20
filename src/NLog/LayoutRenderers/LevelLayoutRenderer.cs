@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,45 +33,58 @@
 
 namespace NLog.LayoutRenderers
 {
-    using System.Diagnostics;
+    using System;
     using System.ComponentModel;
     using System.Text;
-    using System;
-
-    using Config;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The log level.
     /// </summary>
     [LayoutRenderer("level")]
     [ThreadAgnostic]
-    public class LevelLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class LevelLayoutRenderer : LayoutRenderer, IRawValue, IStringValueRenderer
     {
         /// <summary>
         /// Gets or sets a value indicating the output format of the level.
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(LevelFormat.Name)]
         public LevelFormat Format { get; set; }
 
-        /// <summary>
-        /// Renders the current log level and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
+            LogLevel level = GetValue(logEvent);
             switch (Format)
             {
                 case LevelFormat.Name:
-                    builder.Append(logEvent.Level.ToString());
+                    builder.Append(level.ToString());
                     break;
                 case LevelFormat.FirstCharacter:
-                    builder.Append(logEvent.Level.ToString()[0]);
+                    builder.Append(level.ToString()[0]);
                     break;
                 case LevelFormat.Ordinal:
-                    builder.Append(logEvent.Level.Ordinal);
+                    builder.AppendInvariant(level.Ordinal);
                     break;
             }
+        }
+
+        /// <inheritdoc/>
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            value = GetValue(logEvent);
+            return true;
+        }
+
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => Format == LevelFormat.Name ? GetValue(logEvent).ToString() : null;
+
+        private static LogLevel GetValue(LogEventInfo logEvent)
+        {
+            return logEvent.Level;
         }
     }
 }

@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,11 +31,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__ANDROID__ && !__IOS__
-// Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) so the BaseFileAppender class now throws an exception in the constructor.
-#define SupportsMutex
-#endif
-
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !MONO && !NETSTANDARD
 
 namespace NLog.Internal.FileAppenders
@@ -45,10 +40,10 @@ namespace NLog.Internal.FileAppenders
     using System.Security;
     using System.Threading;
 
-    using Common;
+    using NLog.Common;
 
     /// <summary>
-    /// Provides a multiprocess-safe atomic file append while
+    /// Provides a multi process-safe atomic file append while
     /// keeping the files open.
     /// </summary>
     [SecuritySafeCritical]
@@ -56,8 +51,8 @@ namespace NLog.Internal.FileAppenders
     {
         public static readonly IFileAppenderFactory TheFactory = new Factory();
 
-        private FileStream fileStream;
-        private FileCharacteristicsHelper fileCharacteristicsHelper;
+        private FileStream _fileStream;
+        private readonly FileCharacteristicsHelper _fileCharacteristicsHelper;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WindowsMultiProcessFileAppender" /> class.
@@ -69,13 +64,13 @@ namespace NLog.Internal.FileAppenders
             try
             {
                 CreateAppendOnlyFile(fileName);
-                fileCharacteristicsHelper = FileCharacteristicsHelper.CreateHelper(parameters.ForceManaged);
+                _fileCharacteristicsHelper = FileCharacteristicsHelper.CreateHelper(parameters.ForceManaged);
             }
             catch
             {
-                if (fileStream != null)
-                    fileStream.Dispose();
-                fileStream = null;
+                if (_fileStream != null)
+                    _fileStream.Dispose();
+                _fileStream = null;
                 throw;
             }
         }
@@ -111,7 +106,7 @@ namespace NLog.Internal.FileAppenders
                 // If only the FILE_APPEND_DATA and SYNCHRONIZE flags are set, the caller can write only to the end of the file, 
                 // and any offset information about writes to the file is ignored.
                 // However, the file will automatically be extended as necessary for this type of write operation.
-                fileStream = new FileStream(
+                _fileStream = new FileStream(
                     fileName,
                     FileMode.Append,
                     System.Security.AccessControl.FileSystemRights.AppendData | System.Security.AccessControl.FileSystemRights.Synchronize, // <- Atomic append
@@ -119,7 +114,7 @@ namespace NLog.Internal.FileAppenders
                     1,  // No internal buffer, write directly from user-buffer
                     FileOptions.None);
 
-                long filePosition = fileStream.Position;
+                long filePosition = _fileStream.Position;
                 if (fileExists || filePosition > 0)
                 {
                     CreationTimeUtc = File.GetCreationTimeUtc(FileName);
@@ -148,9 +143,9 @@ namespace NLog.Internal.FileAppenders
             }
             catch
             {
-                if (fileStream != null)
-                    fileStream.Dispose();
-                fileStream = null;
+                if (_fileStream != null)
+                    _fileStream.Dispose();
+                _fileStream = null;
                 throw;
             }
         }
@@ -163,14 +158,9 @@ namespace NLog.Internal.FileAppenders
         /// <param name="count">The number of bytes.</param>
         public override void Write(byte[] bytes, int offset, int count)
         {
-            if (fileStream != null)
+            if (_fileStream != null)
             {
-                fileStream.Write(bytes, offset, count);
-
-                if (CaptureLastWriteTime)
-                {
-                    FileTouched();
-                }
+                _fileStream.Write(bytes, offset, count);
             }
         }
 
@@ -179,11 +169,15 @@ namespace NLog.Internal.FileAppenders
         /// </summary>
         public override void Close()
         {
+            if (_fileStream == null)
+            {
+                return;
+            }
+
             InternalLogger.Trace("Closing '{0}'", FileName);
             try
             {
-                if (fileStream != null)
-                    fileStream.Dispose();
+                _fileStream?.Dispose();
             }
             catch (Exception ex)
             {
@@ -192,9 +186,8 @@ namespace NLog.Internal.FileAppenders
             }
             finally
             {
-                fileStream = null;
+                _fileStream = null;
             }
-            FileTouched();
         }
 
         /// <summary>
@@ -210,29 +203,20 @@ namespace NLog.Internal.FileAppenders
             return CreationTimeUtc; // File is kept open, so creation time is static
         }
 
-        public override DateTime? GetFileLastWriteTimeUtc()
-        {
-            var fileChars = GetFileCharacteristics();
-            return fileChars != null ? fileChars.LastWriteTimeUtc : (DateTime?)null;
-        }
-
         /// <summary>
-        /// Gets the length in bytes of the file associated with the appeander.
+        /// Gets the length in bytes of the file associated with the appender.
         /// </summary>
         /// <returns>A long value representing the length of the file in bytes.</returns>
         public override long? GetFileLength()
         {
             var fileChars = GetFileCharacteristics();
-            return fileChars != null ? fileChars.FileLength : (long?)null;
+            return fileChars?.FileLength;
         }
 
         private FileCharacteristics GetFileCharacteristics()
         {
-            if (fileStream == null || fileCharacteristicsHelper == null)
-                return null;
-
             //todo not efficient to read all the whole FileCharacteristics and then using one property
-            return fileCharacteristicsHelper.GetFileCharacteristics(FileName, fileStream);
+            return _fileCharacteristicsHelper.GetFileCharacteristics(FileName, _fileStream);
         }
 
         /// <summary>

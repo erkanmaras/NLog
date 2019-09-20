@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,6 +34,7 @@
 using System;
 using System.IO;
 using System.Text;
+using NLog.Config;
 
 namespace NLog.UnitTests.Config
 {
@@ -45,19 +46,19 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void InternalLoggingConfigTest1()
         {
-            InternalLoggingConfigTest(LogLevel.Trace, true, true, LogLevel.Warn, true, true, @"c:\temp\nlog\file.txt", true);
+            InternalLoggingConfigTest(LogLevel.Trace, true, true, LogLevel.Warn, true, true, @"c:\temp\nlog\file.txt", true, true);
         }
 
         [Fact]
         public void InternalLoggingConfigTest2()
         {
-            InternalLoggingConfigTest(LogLevel.Error, false, false, LogLevel.Info, false, false, @"c:\temp\nlog\file2.txt", false);
+            InternalLoggingConfigTest(LogLevel.Error, false, false, LogLevel.Info, false, false, @"c:\temp\nlog\file2.txt", false, false);
         }
 
         [Fact]
         public void InternalLoggingConfigTes3()
         {
-            InternalLoggingConfigTest(LogLevel.Info, false, false, LogLevel.Trace, false, null, @"c:\temp\nlog\file3.txt", false);
+            InternalLoggingConfigTest(LogLevel.Info, false, false, LogLevel.Trace, false, null, @"c:\temp\nlog\file3.txt", false, true);
         }
 
         [Fact]
@@ -71,9 +72,10 @@ namespace NLog.UnitTests.Config
                 LogManager.GlobalThreshold = LogLevel.Fatal;
                 LogManager.ThrowExceptions = true;
                 LogManager.ThrowConfigExceptions = null;
+                LogManager.AutoShutdown = true;
                 InternalLogger.LogToTrace = true;
 
-                CreateConfigurationFromString(@"
+                XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog>
 </nlog>");
 
@@ -83,6 +85,7 @@ namespace NLog.UnitTests.Config
                 Assert.Same(LogLevel.Fatal, LogManager.GlobalThreshold);
                 Assert.True(LogManager.ThrowExceptions);
                 Assert.Null(LogManager.ThrowConfigExceptions);
+                Assert.True(LogManager.AutoShutdown);
                 Assert.True(InternalLogger.LogToTrace);
             }
         }
@@ -95,8 +98,9 @@ namespace NLog.UnitTests.Config
                 var sb = new StringBuilder();
                 var stringWriter = new StringWriter(sb);
                 InternalLogger.LogWriter = stringWriter;
+                InternalLogger.LogLevel = LogLevel.Info;
                 string wrongFileName = "WRONG/***[]???////WRONG";
-                LogManager.Configuration = CreateConfigurationFromString($@"<?xml version='1.0' encoding='utf-8' ?>
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString($@"<?xml version='1.0' encoding='utf-8' ?>
     <nlog internalLogFile='{wrongFileName}'
           internalLogLevel='Off'
           throwExceptions='true' >
@@ -117,7 +121,7 @@ namespace NLog.UnitTests.Config
             }
         }
 
-        private void InternalLoggingConfigTest(LogLevel logLevel, bool logToConsole, bool logToConsoleError, LogLevel globalThreshold, bool throwExceptions, bool? throwConfigExceptions, string file, bool logToTrace)
+        private void InternalLoggingConfigTest(LogLevel logLevel, bool logToConsole, bool logToConsoleError, LogLevel globalThreshold, bool throwExceptions, bool? throwConfigExceptions, string file, bool logToTrace, bool autoShutdown)
         {
             var logLevelString = logLevel.ToString();
             var internalLogToConsoleString = logToConsole.ToString().ToLower();
@@ -126,17 +130,18 @@ namespace NLog.UnitTests.Config
             var throwExceptionsString = throwExceptions.ToString().ToLower();
             var throwConfigExceptionsString = throwConfigExceptions == null ? "" : throwConfigExceptions.ToString().ToLower();
             var logToTraceString = logToTrace.ToString().ToLower();
+            var autoShutdownString = autoShutdown.ToString().ToLower();
 
             using (new InternalLoggerScope(true))
             {
-                CreateConfigurationFromString($@"
+                XmlLoggingConfiguration.CreateFromXmlString($@"
 <nlog internalLogFile='{file}' internalLogLevel='{logLevelString}' internalLogToConsole='{
                         internalLogToConsoleString
                     }' internalLogToConsoleError='{internalLogToConsoleErrorString}' globalThreshold='{
                         globalThresholdString
                     }' throwExceptions='{throwExceptionsString}' throwConfigExceptions='{
                         throwConfigExceptionsString
-                    }' internalLogToTrace='{logToTraceString}'>
+                    }' internalLogToTrace='{logToTraceString}' autoShutdown='{autoShutdownString}'>
 </nlog>");
 
                 Assert.Same(logLevel, InternalLogger.LogLevel);
@@ -154,6 +159,8 @@ namespace NLog.UnitTests.Config
                 Assert.Equal(throwConfigExceptions, LogManager.ThrowConfigExceptions);
 
                 Assert.Equal(logToTrace, InternalLogger.LogToTrace);
+
+                Assert.Equal(autoShutdown, LogManager.AutoShutdown);
             }
         }
     }

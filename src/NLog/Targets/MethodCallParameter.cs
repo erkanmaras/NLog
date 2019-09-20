@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,8 +34,9 @@
 namespace NLog.Targets
 {
     using System;
-    using Config;
-    using Layouts;
+    using System.ComponentModel;
+    using NLog.Config;
+    using NLog.Layouts;
 
     /// <summary>
     /// A parameter to MethodCall.
@@ -97,14 +98,18 @@ namespace NLog.Targets
         /// </summary>
         /// <docgen category='Parameter Options' order='10' />
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1721:PropertyNamesShouldNotMatchGetMethods", Justification = "Backwards compatibility")]
-        public Type Type { get => ParameterType;
+        [Obsolete("Use property ParameterType instead. Marked obsolete on NLog 4.6")]
+        public Type Type
+        {
+            get => ParameterType;
             set => ParameterType = value;
         }
 
         /// <summary>
-        /// Gets or sets the type of the parameter.
+        /// Gets or sets the type of the parameter. 
         /// </summary>
         /// <docgen category='Parameter Options' order='10' />
+        [DefaultValue(typeof(string))]
         public Type ParameterType { get; set; }
 
         /// <summary>
@@ -113,25 +118,5 @@ namespace NLog.Targets
         /// <docgen category='Parameter Options' order='10' />
         [RequiredParameter]
         public Layout Layout { get; set; }
-
-        /// <summary>
-        /// Parameter can combine multiple LogEvents into a single parameter value
-        /// </summary>
-        public bool EnableGroupLayout { get; set; }
-
-        /// <summary>
-        /// Group Header when combining multiple LogEvents into a single parameter value (<see cref="EnableGroupLayout"/>)
-        /// </summary>
-        public Layout GroupHeaderLayout { get; set; }
-
-        /// <summary>
-        /// Group Item Separator when combining multiple LogEvents into a single parameter value (<see cref="EnableGroupLayout"/>)
-        /// </summary>
-        public Layout GroupItemSeparatorLayout { get; set; }
-
-        /// <summary>
-        /// Group Footer when combining multiple LogEvents into a single parameter value (<see cref="EnableGroupLayout"/>)
-        /// </summary>
-        public Layout GroupFooterLayout { get; set; }
     }
 }

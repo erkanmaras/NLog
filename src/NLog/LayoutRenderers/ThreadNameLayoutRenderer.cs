@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,21 +34,31 @@
 namespace NLog.LayoutRenderers
 {
     using System.Text;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The name of the current thread.
     /// </summary>
     [LayoutRenderer("threadname")]
-    public class ThreadNameLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class ThreadNameLayoutRenderer : LayoutRenderer, IStringValueRenderer
     {
-        /// <summary>
-        /// Renders the current thread name and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            builder.Append(System.Threading.Thread.CurrentThread.Name);
+            builder.Append(GetStringValue());
         }
+
+        private static string GetStringValue()
+        {
+#if !NETSTANDARD1_3
+            return System.Threading.Thread.CurrentThread.Name;
+#else
+            return string.Empty;
+#endif
+        }
+
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent) => GetStringValue();
     }
 }

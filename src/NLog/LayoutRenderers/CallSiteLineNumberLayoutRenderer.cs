@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,11 +33,10 @@
 
 using System;
 using System.ComponentModel;
-using System.Diagnostics;
-using System.Linq;
 using System.Text;
 using NLog.Config;
 using NLog.Internal;
+
 #if !SILVERLIGHT
 namespace NLog.LayoutRenderers
 {
@@ -46,11 +45,13 @@ namespace NLog.LayoutRenderers
     /// </summary>
     [LayoutRenderer("callsite-linenumber")]
     [ThreadAgnostic]
-    public class CallSiteLineNumberLayoutRenderer : LayoutRenderer, IUsesStackTrace
+    [ThreadSafe]
+    public class CallSiteLineNumberLayoutRenderer : LayoutRenderer, IUsesStackTrace, IRawValue
     {
         /// <summary>
         /// Gets or sets the number of frames to skip.
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(0)]
         public int SkipFrames { get; set; }
         
@@ -59,20 +60,29 @@ namespace NLog.LayoutRenderers
         /// </summary>
         StackTraceUsage IUsesStackTrace.StackTraceUsage => StackTraceUsage.WithSource;
 
-        /// <summary>
-        /// Renders the call site and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            StackFrame frame = logEvent.StackTrace != null ? logEvent.StackTrace.GetFrame(logEvent.UserStackFrameNumber + SkipFrames) : null;
-            if (frame != null)
-            {
-                var linenumber = frame.GetFileLineNumber();
-                builder.Append(linenumber);
+            var lineNumber = GetLineNumber(logEvent);
+            if (lineNumber.HasValue)
+                builder.AppendInvariant(lineNumber.Value);
+        }
 
+        /// <inheritdoc />
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            value = GetLineNumber(logEvent);
+            return true;
+        }
+
+        private int? GetLineNumber(LogEventInfo logEvent)
+        {
+            if (logEvent.CallSiteInformation == null)
+            {
+                return null;
             }
+
+            return logEvent.CallSiteInformation.GetCallerLineNumber(SkipFrames);
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,7 +36,7 @@ namespace NLog.LayoutRenderers.Wrappers
     using System.Linq;
     using System.Text;
     using System.Text.RegularExpressions;
-    using Config;
+    using NLog.Config;
 
     /// <summary>
     /// Replaces a string in the output of another layout with another string.
@@ -45,7 +45,9 @@ namespace NLog.LayoutRenderers.Wrappers
     /// ${replace:searchFor=\\n+:replaceWith=-:regex=true:inner=${message}}
     /// </example>
     [LayoutRenderer("replace")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class ReplaceLayoutRendererWrapper : WrapperLayoutRendererBase
     {
         private Regex _regex;
@@ -118,7 +120,7 @@ namespace NLog.LayoutRenderers.Wrappers
 
             if (WholeWords)
             {
-                regexString = "\\b" + regexString + "\\b";
+                regexString = string.Concat("\\b", regexString, "\\b");
             }
 
             _regex = new Regex(regexString, regexOptions);
@@ -131,11 +133,15 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <returns>Post-processed text.</returns>
         protected override string Transform(string text)
         {
-            var replacer = new Replacer(text, ReplaceGroupName, ReplaceWith);
-
-            return string.IsNullOrEmpty(ReplaceGroupName) ?
-                _regex.Replace(text, ReplaceWith)
-                : _regex.Replace(text, replacer.EvaluateMatch);
+            if (string.IsNullOrEmpty(ReplaceGroupName))
+            {
+                return _regex.Replace(text, ReplaceWith);
+            }
+            else
+            {
+                var replacer = new Replacer(text, ReplaceGroupName, ReplaceWith);
+                return _regex.Replace(text, replacer.EvaluateMatch);
+            }
         }
 
         /// <summary>

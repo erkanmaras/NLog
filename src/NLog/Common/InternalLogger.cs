@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,20 +40,16 @@ namespace NLog.Common
     using System.IO;
     using System.Reflection;
     using System.Text;
-    using Internal;
-    using Time;
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD
-    using ConfigurationManager = System.Configuration.ConfigurationManager;
-    using System.Diagnostics;
-#endif
+    using NLog.Internal;
+    using NLog.Time;
 
     /// <summary>
     /// NLog internal logger.
     /// 
-    /// Writes to file, console or custom textwriter (see <see cref="InternalLogger.LogWriter"/>)
+    /// Writes to file, console or custom text writer (see <see cref="InternalLogger.LogWriter"/>)
     /// </summary>
     /// <remarks>
-    /// Don't use <see cref="ExceptionHelper.MustBeRethrown"/> as that can lead to recursive calls - stackoverflows
+    /// Don't use <see cref="ExceptionHelper.MustBeRethrown"/> as that can lead to recursive calls - stackoverflow
     /// </remarks>
     public static partial class InternalLogger
     {
@@ -76,7 +72,7 @@ namespace NLog.Common
         {
             // TODO: Extract class - InternalLoggerConfigurationReader
 
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
             LogToConsole = GetSetting("nlog.internalLogToConsole", "NLOG_INTERNAL_LOG_TO_CONSOLE", false);
             LogToConsoleError = GetSetting("nlog.internalLogToConsoleError", "NLOG_INTERNAL_LOG_TO_CONSOLE_ERROR", false);
             LogLevel = GetSetting("nlog.internalLogLevel", "NLOG_INTERNAL_LOG_LEVEL", LogLevel.Info);
@@ -99,7 +95,8 @@ namespace NLog.Common
         /// Gets or sets the minimal internal log level. 
         /// </summary>
         /// <example>If set to <see cref="NLog.LogLevel.Info"/>, then messages of the levels <see cref="NLog.LogLevel.Info"/>, <see cref="NLog.LogLevel.Error"/> and <see cref="NLog.LogLevel.Fatal"/> will be written.</example>
-        public static LogLevel LogLevel { get; set; }
+        public static LogLevel LogLevel { get => _logLevel; set => _logLevel = value ?? LogLevel.Info; }
+        private static LogLevel _logLevel;
 
         /// <summary>
         /// Gets or sets a value indicating whether internal messages should be written to the console output stream.
@@ -115,7 +112,7 @@ namespace NLog.Common
 
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__
         /// <summary>
-        /// Gets or sets a value indicating whether internal messages should be written to the <see cref="System.Diagnostics.Trace"/>.
+        /// Gets or sets a value indicating whether internal messages should be written to the <see cref="System.Diagnostics"/>.Trace
         /// </summary>
         public static bool LogToTrace { get; set; }
 #endif
@@ -189,7 +186,7 @@ namespace NLog.Common
         /// <param name="messageFunc">Function that returns the log message.</param>
         public static void Log(LogLevel level, [Localizable(false)] Func<string> messageFunc)
         {
-            if (level >= LogLevel)
+            if (!IsLogLevelDisabled(level))
             {
                 Write(null, level, messageFunc(), null);
             }
@@ -202,10 +199,9 @@ namespace NLog.Common
         /// <param name="ex">Exception to be logged.</param>
         /// <param name="level">Log level.</param>
         /// <param name="messageFunc">Function that returns the log message.</param>
-        [StringFormatMethod("message")]
         public static void Log(Exception ex, LogLevel level, [Localizable(false)] Func<string> messageFunc)
         {
-            if (level >= LogLevel)
+            if (!IsLogLevelDisabled(level))
             {
                 Write(ex, level, messageFunc(), null);
             }
@@ -244,13 +240,18 @@ namespace NLog.Common
         /// <param name="args">optional args for <paramref name="message"/></param>
         private static void Write([CanBeNull]Exception ex, LogLevel level, string message, [CanBeNull]object[] args)
         {
+            if (IsLogLevelDisabled(level))
+            {
+                return;
+            }
+
             if (IsSeriousException(ex))
             {
                 //no logging!
                 return;
             }
 
-            if (!IsLoggingEnabled(level))
+            if (!HasActiveLoggers())
             {
                 return;
             }
@@ -261,10 +262,13 @@ namespace NLog.Common
 
                 WriteToLogFile(msg);
                 WriteToTextWriter(msg);
+
+#if !NETSTANDARD1_3
                 WriteToConsole(msg);
                 WriteToErrorConsole(msg);
+#endif
 
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD1_3
                 WriteToTrace(msg);
 #endif
             }
@@ -282,30 +286,30 @@ namespace NLog.Common
 
         private static string FormatMessage([CanBeNull]Exception ex, LogLevel level, string message, [CanBeNull]object[] args)
         {
-            const string TimeStampFormat = "yyyy-MM-dd HH:mm:ss.ffff";
-            const string FieldSeparator = " ";
+            const string timeStampFormat = "yyyy-MM-dd HH:mm:ss.ffff";
+            const string fieldSeparator = " ";
 
             var formattedMessage =
                 (args == null) ? message : string.Format(CultureInfo.InvariantCulture, message, args);
 
-            var builder = new StringBuilder(formattedMessage.Length + TimeStampFormat.Length + (ex?.ToString()?.Length ?? 0) + 25);
+            var builder = new StringBuilder(formattedMessage.Length + timeStampFormat.Length + (ex?.ToString().Length ?? 0) + 25);
             if (IncludeTimestamp)
             {
                 builder
-                    .Append(TimeSource.Current.Time.ToString(TimeStampFormat, CultureInfo.InvariantCulture))
-                    .Append(FieldSeparator);
+                    .Append(TimeSource.Current.Time.ToString(timeStampFormat, CultureInfo.InvariantCulture))
+                    .Append(fieldSeparator);
             }
 
             builder
                 .Append(level)
-                .Append(FieldSeparator)
+                .Append(fieldSeparator)
                 .Append(formattedMessage);
 
             if (ex != null)
             {
                 ex.MarkAsLoggedToInternalLogger();
                 builder
-                    .Append(FieldSeparator)
+                    .Append(fieldSeparator)
                     .Append("Exception: ")
                     .Append(ex);
             }
@@ -324,17 +328,21 @@ namespace NLog.Common
         }
 
         /// <summary>
-        /// Determine if logging is enabled.
+        /// Determine if logging is enabled for given LogLevel
         /// </summary>
         /// <param name="logLevel">The <see cref="LogLevel"/> for the log event.</param>
         /// <returns><c>true</c> if logging is enabled; otherwise, <c>false</c>.</returns>
-        private static bool IsLoggingEnabled(LogLevel logLevel)
+        private static bool IsLogLevelDisabled(LogLevel logLevel)
         {
-            if (logLevel == LogLevel.Off || logLevel < LogLevel)
-            {
-                return false;
-            }
+            return ReferenceEquals(_logLevel, LogLevel.Off) || logLevel < _logLevel;
+        }
 
+        /// <summary>
+        /// Determine if logging is enabled.
+        /// </summary>
+        /// <returns><c>true</c> if logging is enabled; otherwise, <c>false</c>.</returns>
+        internal static bool HasActiveLoggers()
+        {
             return !string.IsNullOrEmpty(LogFile) ||
                    LogToConsole ||
                    LogToConsoleError ||
@@ -366,7 +374,7 @@ namespace NLog.Common
                 {
                     textWriter.WriteLine(message);
                 }
-            }            
+            }
         }
 
         /// <summary>
@@ -391,6 +399,7 @@ namespace NLog.Common
             }
         }
 
+#if !NETSTANDARD1_3
         /// <summary>
         /// Write internal messages to the <see cref="System.Console"/>.
         /// </summary>
@@ -411,7 +420,9 @@ namespace NLog.Common
                 Console.WriteLine(message);
             }
         }
+#endif
 
+#if !NETSTANDARD1_3
         /// <summary>
         /// Write internal messages to the <see cref="System.Console.Error"/>.
         /// </summary>
@@ -431,17 +442,17 @@ namespace NLog.Common
             {
                 Console.Error.WriteLine(message);
             }
-
         }
+#endif
 
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD1_3
         /// <summary>
         /// Write internal messages to the <see cref="System.Diagnostics.Trace"/>.
         /// </summary>
         /// <param name="message">A message to write.</param>
         /// <remarks>
         /// Works when property <see cref="LogToTrace"/> set to true.
-        /// The <see cref="System.Diagnostics.Trace"/> is used in Debug and Relese configuration. 
+        /// The <see cref="System.Diagnostics.Trace"/> is used in Debug and Release configuration. 
         /// The <see cref="System.Diagnostics.Debug"/> works only in Debug configuration and this is reason why is replaced by <see cref="System.Diagnostics.Trace"/>.
         /// in DEBUG 
         /// </remarks>
@@ -464,14 +475,15 @@ namespace NLog.Common
         {
             try
             {
-#if SILVERLIGHT || __IOS__ || __ANDROID__ || NETSTANDARD
+#if SILVERLIGHT || __IOS__ || __ANDROID__ || NETSTANDARD1_0
                 Info(assembly.FullName);
 #else
-                var fileVersionInfo = FileVersionInfo.GetVersionInfo(assembly.Location);
+                var fileVersionInfo = !string.IsNullOrEmpty(assembly.Location) ?
+                    System.Diagnostics.FileVersionInfo.GetVersionInfo(assembly.Location) : null;
                 Info("{0}. File version: {1}. Product version: {2}.",
                     assembly.FullName,
-                    fileVersionInfo.FileVersion,
-                    fileVersionInfo.ProductVersion);
+                    fileVersionInfo?.FileVersion,
+                    fileVersionInfo?.ProductVersion);
 #endif
             }
             catch (Exception ex)
@@ -480,26 +492,55 @@ namespace NLog.Common
             }
         }
 
+        private static string GetAppSettings(string configName)
+        {
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD
+            try
+            {
+                return System.Configuration.ConfigurationManager.AppSettings[configName];
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrownImmediately())
+                {
+                    throw;
+                }
+            }
+#endif
+            return null;
+        }
+
         private static string GetSettingString(string configName, string envName)
         {
-            string settingValue = ConfigurationManager.AppSettings[configName];
-            if (settingValue == null)
+            try
             {
-                try
+                string settingValue = GetAppSettings(configName);
+                if (settingValue != null)
+                    return settingValue;
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrownImmediately())
                 {
-                    settingValue = Environment.GetEnvironmentVariable(envName);
-                }
-                catch (Exception exception)
-                {
-                    if (exception.MustBeRethrownImmediately())
-                    {
-                        throw;
-                    }
+                    throw;
                 }
             }
 
-            return settingValue;
+            try
+            {
+                string settingValue = EnvironmentHelper.GetSafeEnvironmentVariable(envName);
+                if (!string.IsNullOrEmpty(settingValue))
+                    return settingValue;
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrownImmediately())
+                {
+                    throw;
+                }
+            }
+
+            return null;
         }
 
         private static LogLevel GetSetting(string configName, string envName, LogLevel defaultValue)
@@ -547,7 +588,6 @@ namespace NLog.Common
                 return defaultValue;
             }
         }
-#endif
 
 #if !SILVERLIGHT
         private static void CreateDirectoriesIfNeeded(string filename)

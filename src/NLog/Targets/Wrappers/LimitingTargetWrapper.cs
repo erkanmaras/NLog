@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -86,7 +86,7 @@ namespace NLog.Targets.Wrappers
             MessageLimit = messageLimit;
             Interval = interval;
             WrappedTarget = wrappedTarget;
-            OptimizeBufferReuse = GetType() == typeof(LimitingTargetWrapper);
+            OptimizeBufferReuse = GetType() == typeof(LimitingTargetWrapper);   // Class not sealed, reduce breaking changes
         }
 
         /// <summary>
@@ -95,6 +95,7 @@ namespace NLog.Targets.Wrappers
         /// <remarks>
         /// Messages received after <see cref="MessageLimit"/> has been reached in the current <see cref="Interval"/> will be discarded.
         /// </remarks>
+        /// <docgen category='General Options' order='10' />
         [DefaultValue(1000)]
         public int MessageLimit { get; set; }
 
@@ -104,17 +105,20 @@ namespace NLog.Targets.Wrappers
         /// <remarks>
         /// Messages received after <see cref="MessageLimit"/> has been reached in the current <see cref="Interval"/> will be discarded.
         /// </remarks>
+        /// <docgen category='General Options' order='10' />
         [DefaultValue(typeof(TimeSpan), "01:00")]
         public TimeSpan Interval { get; set; }
 
         /// <summary>
         /// Gets the <c>DateTime</c> when the current <see cref="Interval"/> will be reset.
         /// </summary>
+        /// <docgen category='General Options' order='10' />
         public DateTime IntervalResetsAt => _firstWriteInInterval + Interval;
 
         /// <summary>
         /// Gets the number of <see cref="AsyncLogEventInfo"/> written in the current <see cref="Interval"/>.
         /// </summary>
+        /// <docgen category='General Options' order='10' />
         public int MessagesWrittenCount { get; private set; }
 
         /// <summary>
@@ -129,7 +133,7 @@ namespace NLog.Targets.Wrappers
 
             base.InitializeTarget();
             ResetInterval();
-            InternalLogger.Trace("LimitingTargetWraper '{0}': initialized with MessageLimit={1} and Interval={2}.", Name, MessageLimit, Interval);
+            InternalLogger.Trace("LimitingWrapper(Name={0}): Initialized with MessageLimit={1} and Interval={2}.", Name, MessageLimit, Interval);
         }
 
 
@@ -144,7 +148,7 @@ namespace NLog.Targets.Wrappers
             if (IsIntervalExpired())
             {
                 ResetInterval();
-                InternalLogger.Debug("LimitingWrapper '{0}': new interval of '{1}' started.", Name, Interval);
+                InternalLogger.Debug("LimitingWrapper(Name={0}): New interval of '{1}' started.", Name, Interval);
             }
 
             if (MessagesWrittenCount < MessageLimit)
@@ -155,7 +159,7 @@ namespace NLog.Targets.Wrappers
             else
             {
                 logEvent.Continuation(null);
-                InternalLogger.Trace("LimitingWrapper '{0}': discarded event, because MessageLimit of '{1}' was reached.", Name, MessageLimit);
+                InternalLogger.Trace("LimitingWrapper(Name={0}): Discarded event, because MessageLimit of '{1}' was reached.", Name, MessageLimit);
             }
         }
 

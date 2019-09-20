@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -42,13 +42,13 @@ namespace NLog.Targets
     public class JsonSerializeOptions
     {
         /// <summary>
-        /// Add quotes arround object keys?
+        /// Add quotes around object keys?
         /// </summary>
         [DefaultValue(true)]
         public bool QuoteKeys { get; set; }
 
         /// <summary>
-        /// Formatprovider for value
+        /// Format provider for value
         /// </summary>
         public IFormatProvider FormatProvider { get; set; }
 
@@ -69,10 +69,25 @@ namespace NLog.Targets
         [DefaultValue(false)]
         public bool EnumAsInteger { get; set; }
 
+        /// <summary>
+        /// Should dictionary keys be sanitized. All characters must either be letters, numbers or underscore character (_).
+        /// 
+        /// Any other characters will be converted to underscore character (_)
+        /// </summary>
+        [DefaultValue(false)]
+        public bool SanitizeDictionaryKeys { get; set; }
+
+        /// <summary>
+        /// How far down the rabbit hole should the Json Serializer go with object-reflection before stopping
+        /// </summary>
+        [DefaultValue(10)]
+        public int MaxRecursionLimit { get; set; }
+
         /// <summary>Initializes a new instance of the <see cref="T:System.Object" /> class.</summary>
         public JsonSerializeOptions()
         {
             QuoteKeys = true;
+            MaxRecursionLimit = 10;
         }
     }
 }

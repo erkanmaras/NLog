@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,15 +36,16 @@
 namespace NLog.LayoutRenderers
 {
     using System.Text;
-    using Layouts;
-    using Config;
-    using Internal;
+    using NLog.Layouts;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The environment variable.
     /// </summary>
     [LayoutRenderer("environment")]
-    public class EnvironmentLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class EnvironmentLayoutRenderer : LayoutRenderer, IStringValueRenderer
     {
         /// <summary>
         /// Gets or sets the name of the environment variable.
@@ -62,12 +63,24 @@ namespace NLog.LayoutRenderers
 
         private System.Collections.Generic.KeyValuePair<string, SimpleLayout> _cachedValue;
 
-        /// <summary>
-        /// Renders the specified environment variable and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc/>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            GetSimpleLayout()?.RenderAppendBuilder(logEvent, builder);
+        }
+
+        /// <inheritdoc/>
+        string IStringValueRenderer.GetFormattedString(LogEventInfo logEvent)
+        {
+            var simpleLayout = GetSimpleLayout();
+            if (simpleLayout == null)
+                return string.Empty;
+            if (simpleLayout.IsFixedText || simpleLayout.IsSimpleStringText)
+                return simpleLayout.Render(logEvent);
+            return null;
+        } 
+
+        private SimpleLayout GetSimpleLayout()
         {
             if (Variable != null)
             {
@@ -77,15 +90,19 @@ namespace NLog.LayoutRenderers
 
                 if (!string.IsNullOrEmpty(environmentVariable))
                 {
-                    if (string.CompareOrdinal(_cachedValue.Key, environmentVariable) != 0)
+                    var cachedValue = _cachedValue;
+                    if (string.CompareOrdinal(cachedValue.Key, environmentVariable) != 0)
                     {
-                        _cachedValue = new System.Collections.Generic.KeyValuePair<string, SimpleLayout>(environmentVariable,
+                        cachedValue = new System.Collections.Generic.KeyValuePair<string, SimpleLayout>(environmentVariable,
                             new SimpleLayout(environmentVariable));
+                        _cachedValue = cachedValue;
                     }
 
-                    _cachedValue.Value.RenderAppendBuilder(logEvent, builder);
+                    return cachedValue.Value;
                 }
             }
+
+            return null;
         }
     }
 }

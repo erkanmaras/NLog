@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,11 +31,12 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace NLog.Targets.Wrappers
 {
-    using System;
-    using Common;
-    using Internal;
+    using System.Threading;
+    using NLog.Common;
 
     /// <summary>
     /// Provides fallback-on-error.
@@ -58,8 +59,7 @@ namespace NLog.Targets.Wrappers
     [Target("FallbackGroup", IsCompound = true)]
     public class FallbackGroupTarget : CompoundTargetBase
     {
-        private int _currentTarget;
-        private object _lockObject = new object();
+        private long _currentTarget;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FallbackGroupTarget"/> class.
@@ -87,7 +87,7 @@ namespace NLog.Targets.Wrappers
         public FallbackGroupTarget(params Target[] targets)
             : base(targets)
         {
-            OptimizeBufferReuse = GetType() == typeof(FallbackGroupTarget);
+            OptimizeBufferReuse = GetType() == typeof(FallbackGroupTarget); // Class not sealed, reduce breaking changes
         }
 
         /// <summary>
@@ -95,6 +95,15 @@ namespace NLog.Targets.Wrappers
         /// </summary>
         /// <docgen category='Fallback Options' order='10' />
         public bool ReturnToFirstOnSuccess { get; set; }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="logEvent"></param>
+        protected override void WriteAsyncThreadSafe(AsyncLogEventInfo logEvent)
+        {
+            Write(logEvent);
+        }
 
         /// <summary>
         /// Forwards the log event to the sub-targets until one of them succeeds.
@@ -107,6 +116,7 @@ namespace NLog.Targets.Wrappers
         /// resets the target to the first target
         /// stored in <see cref="Targets"/>.
         /// </remarks>
+        [SuppressMessage("ReSharper", "AccessToModifiedClosure")]
         protected override void Write(AsyncLogEventInfo logEvent)
         {
             AsyncContinuation continuation = null;
@@ -118,15 +128,18 @@ namespace NLog.Targets.Wrappers
                     if (ex == null)
                     {
                         // success
-                        lock (_lockObject)
+                        if (ReturnToFirstOnSuccess)
                         {
-                            if (_currentTarget != 0)
+#pragma warning disable S1066 // Collapsible "if" statements should be merged
+#if !SILVERLIGHT || WINDOWS_PHONE
+                            if (Interlocked.Read(ref _currentTarget) != 0)
+#else
+                            if (Interlocked.CompareExchange(ref _currentTarget, 0, 0) != 0)
+#endif
+#pragma warning restore S1066 // Collapsible "if" statements should be merged
                             {
-                                if (ReturnToFirstOnSuccess)
-                                {
-                                    InternalLogger.Debug("Fallback: target '{0}' succeeded. Returning to the first one.", Targets[targetToInvoke]);
-                                    _currentTarget = 0;
-                                }
+                                InternalLogger.Debug("FallbackGroup(Name={0}): Target '{1}' succeeded. Returning to the first one.", Name, Targets[targetToInvoke]);
+                                Interlocked.Exchange(ref _currentTarget, 0);
                             }
                         }
 
@@ -135,19 +148,19 @@ namespace NLog.Targets.Wrappers
                     }
 
                     // failure
-                    lock (_lockObject)
+                    InternalLogger.Warn(ex, "FallbackGroup(Name={0}): Target '{1}' failed. Proceeding to the next one.", Name, Targets[targetToInvoke]);
+
+                    // error while writing, go to the next one
+                    tryCounter++;
+                    int nextTarget = (targetToInvoke + 1) % Targets.Count;
+                    Interlocked.CompareExchange(ref _currentTarget, nextTarget, targetToInvoke);
+                    if (tryCounter >= Targets.Count)
                     {
-                        InternalLogger.Warn(ex, "Fallback: target '{0}' failed. Proceeding to the next one.", Targets[targetToInvoke]);
-
-                        // error while writing, go to the next one
-                        _currentTarget = (targetToInvoke + 1) % Targets.Count;
-
-                        tryCounter++;
-                        targetToInvoke = _currentTarget;
-                        if (tryCounter >= Targets.Count)
-                        {
-                            targetToInvoke = -1;
-                        }
+                        targetToInvoke = -1;
+                    }
+                    else
+                    {
+                        targetToInvoke = nextTarget;
                     }
 
                     if (targetToInvoke >= 0)
@@ -160,9 +173,18 @@ namespace NLog.Targets.Wrappers
                     }
                 };
 
-            lock (_lockObject)
+#if !SILVERLIGHT || WINDOWS_PHONE
+            targetToInvoke = (int)Interlocked.Read(ref _currentTarget);
+#else
+            targetToInvoke = (int)Interlocked.CompareExchange(ref _currentTarget, 0, 0);
+#endif
+
+            for (int i = 0; i < Targets.Count; ++i)
             {
-                targetToInvoke = _currentTarget;
+                if (i != targetToInvoke)
+                {
+                    Targets[i].PrecalculateVolatileLayouts(logEvent.LogEvent);
+                }
             }
 
             Targets[targetToInvoke].WriteAsyncLogEvent(logEvent.LogEvent.WithContinuation(continuation));

@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -56,6 +56,21 @@ namespace NLog.Internal
                 path = Path.Combine(path, file);
             }
             return path;
+        }
+
+        /// <summary>
+        /// Cached directory separator char array to avoid memory allocation on each method call.
+        /// </summary>
+        private static readonly char[] DirectorySeparatorChars = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+
+        /// <summary>
+        /// Trims directory separators from the path
+        /// </summary>
+        /// <param name="path">path, could be null</param>
+        /// <returns>never null</returns>
+        public static string TrimDirectorySeparators(string path)
+        {
+            return path?.TrimEnd(DirectorySeparatorChars) ?? string.Empty;
         }
     }
 }

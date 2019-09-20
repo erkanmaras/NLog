@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -128,11 +128,11 @@ namespace NLog.UnitTests.Targets.Wrappers
             };
 
             string result = RunAndCaptureInternalLog(() => wrapper.WriteAsyncLogEvents(events), LogLevel.Trace);
-            Assert.True(result.IndexOf("Trace Running PostFilteringWrapper Target[(unnamed)](MyTarget) on 7 events") != -1);
-            Assert.True(result.IndexOf("Trace Rule matched: (level >= Warn)") != -1);
-            Assert.True(result.IndexOf("Trace Filter to apply: (level >= Debug)") != -1);
-            Assert.True(result.IndexOf("Trace After filtering: 6 events.") != -1);
-            Assert.True(result.IndexOf("Trace Sending to MyTarget") != -1);
+            Assert.True(result.IndexOf("Running on 7 events") != -1);
+            Assert.True(result.IndexOf("Rule matched: (level >= Warn)") != -1);
+            Assert.True(result.IndexOf("Filter to apply: (level >= Debug)") != -1);
+            Assert.True(result.IndexOf("After filtering: 6 events.") != -1);
+            Assert.True(result.IndexOf("Sending to MyTarget") != -1);
 
             // make sure all Debug,Info,Warn events went through
             Assert.Equal(6, target.Events.Count);
@@ -184,11 +184,11 @@ namespace NLog.UnitTests.Targets.Wrappers
             };
 
             var result = RunAndCaptureInternalLog(() => wrapper.WriteAsyncLogEvents(events), LogLevel.Trace);
-            Assert.True(result.IndexOf("Trace Running PostFilteringWrapper Target[(unnamed)](MyTarget) on 7 events") != -1);
-            Assert.True(result.IndexOf("Trace Rule matched: (level >= Error)") != -1);
-            Assert.True(result.IndexOf("Trace Filter to apply: True") != -1);
-            Assert.True(result.IndexOf("Trace After filtering: 7 events.") != -1);
-            Assert.True(result.IndexOf("Trace Sending to MyTarget") != -1);
+            Assert.True(result.IndexOf("Running on 7 events") != -1);
+            Assert.True(result.IndexOf("Rule matched: (level >= Error)") != -1);
+            Assert.True(result.IndexOf("Filter to apply: True") != -1);
+            Assert.True(result.IndexOf("After filtering: 7 events.") != -1);
+            Assert.True(result.IndexOf("Sending to MyTarget") != -1);
 
             // make sure all events went through
             Assert.Equal(7, target.Events.Count);
@@ -201,6 +201,26 @@ namespace NLog.UnitTests.Targets.Wrappers
             Assert.Same(events[6].LogEvent, target.Events[6]);
 
             Assert.Equal(events.Length, exceptions.Count);
+        }
+
+        [Fact]
+        public void PostFilteringTargetWrapperOnlyDefaultFilter()
+        {
+            var target = new MyTarget() { OptimizeBufferReuse = true };
+            var wrapper = new PostFilteringTargetWrapper()
+            {
+                WrappedTarget = target,
+                DefaultFilter = "level >= LogLevel.Info",   // by default log info and above
+            };
+
+            wrapper.Initialize(null);
+            target.Initialize(null);
+
+            var exceptions = new List<Exception>();
+            wrapper.WriteAsyncLogEvent(new LogEventInfo(LogLevel.Info, "Logger1", "Hello").WithContinuation(exceptions.Add));
+            Assert.Single(target.Events);
+            wrapper.WriteAsyncLogEvent(new LogEventInfo(LogLevel.Debug, "Logger1", "Hello").WithContinuation(exceptions.Add));
+            Assert.Single(target.Events);
         }
 
         [Fact]

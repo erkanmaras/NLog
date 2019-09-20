@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,15 +33,20 @@
 
 namespace NLog.LayoutRenderers.Wrappers
 {
+    using System;
     using System.ComponentModel;
-    using Config;
+    using System.Text;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Trims the whitespace from the result of another layout renderer.
     /// </summary>
     [LayoutRenderer("trim-whitespace")]
     [AmbientProperty("TrimWhiteSpace")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class TrimWhiteSpaceLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
     {
         /// <summary>
@@ -60,43 +65,31 @@ namespace NLog.LayoutRenderers.Wrappers
         [DefaultValue(true)]
         public bool TrimWhiteSpace { get; set; }
 
-        /// <summary>
-        /// Removes white-spaces from both sides of the provided target
-        /// </summary>
-        /// <param name="target">Output to be transform.</param>
-        protected override void TransformFormattedMesssage(System.Text.StringBuilder target)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
-            if (target == null || target.Length == 0)
-                return;
-
-            if (TrimWhiteSpace)
+            Inner.RenderAppendBuilder(logEvent, builder);
+            if (TrimWhiteSpace && builder.Length > orgLength)
             {
-                TrimRight(target);  // Fast
-                if (target.Length > 0)
-                    TrimLeft(target);   // Slower
+                TransformTrimWhiteSpaces(builder, orgLength);
             }
         }
 
-        private void TrimRight(System.Text.StringBuilder sb)
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
+        protected override void TransformFormattedMesssage(StringBuilder target)
         {
-            int i = sb.Length - 1;
-            for (; i >= 0; i--)
-                if (!char.IsWhiteSpace(sb[i]))
-                    break;
-
-            if (i < sb.Length - 1)
-                sb.Length = i + 1;
         }
 
-        private void TrimLeft(System.Text.StringBuilder sb)
+        private static void TransformTrimWhiteSpaces(StringBuilder builder, int startPos)
         {
-            int i = 0;
-            for (; i < sb.Length; i++)
-                if (!char.IsWhiteSpace(sb[i]))
-                    break;
-
-            if (i > 0)
-                sb.Remove(0, i);
+            builder.TrimRight(startPos);  // Fast
+            if (builder.Length > startPos && char.IsWhiteSpace(builder[startPos]))
+            {
+                var str = builder.ToString(startPos, builder.Length - startPos);
+                builder.Length = startPos;
+                builder.Append(str.Trim());
+            }
         }
     }
 }

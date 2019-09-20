@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,7 +37,7 @@ namespace NLog
     using Config;
 
     /// <summary>
-    /// Mapped Diagnostics Context - used for log4net compatibility.
+    /// Mapped Diagnostics Context
     /// </summary>
     /// <remarks>This class marked as obsolete before NLog 2.0 and it may be removed in a future release.</remarks>
     [Obsolete("Use MappedDiagnosticsContext class instead. Marked obsolete on NLog 2.0")]

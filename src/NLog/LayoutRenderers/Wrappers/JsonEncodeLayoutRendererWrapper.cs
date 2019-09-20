@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,14 +36,16 @@ namespace NLog.LayoutRenderers.Wrappers
     using System;
     using System.ComponentModel;
     using System.Text;
-    using Config;
+    using NLog.Config;
 
     /// <summary>
     /// Escapes output of another layout using JSON rules.
     /// </summary>
     [LayoutRenderer("json-encode")]
     [AmbientProperty("JsonEncode")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class JsonEncodeLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
     {
         /// <summary>
@@ -69,26 +71,27 @@ namespace NLog.LayoutRenderers.Wrappers
         [DefaultValue(true)]
         public bool EscapeUnicode { get; set; }
 
-        /// <summary>
-        /// Post-processes the rendered message. 
-        /// </summary>
-        /// <param name="target">The text to be JSON-encoded.</param>
-        protected override void TransformFormattedMesssage(StringBuilder target)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
-            if (JsonEncode)
+            Inner.RenderAppendBuilder(logEvent, builder);
+            if (JsonEncode && builder.Length > orgLength && RequiresJsonEncode(builder, orgLength))
             {
-                if (RequiresJsonEncode(target))
-                {
-                    var result = Targets.DefaultJsonSerializer.EscapeString(target.ToString(), EscapeUnicode);
-                    target.Length = 0;
-                    target.Append(result);
-                }
+                var str = builder.ToString(orgLength, builder.Length - orgLength);
+                builder.Length = orgLength;
+                Targets.DefaultJsonSerializer.AppendStringEscape(builder, str, EscapeUnicode);
             }
         }
 
-        private bool RequiresJsonEncode(StringBuilder target)
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
+        protected override void TransformFormattedMesssage(StringBuilder target)
         {
-            for (int i = 0; i < target.Length; ++i)
+        }
+
+        private bool RequiresJsonEncode(StringBuilder target, int startPos = 0)
+        {
+            for (int i = startPos; i < target.Length; ++i)
             {
                 if (Targets.DefaultJsonSerializer.RequiresJsonEscape(target[i], EscapeUnicode))
                 {

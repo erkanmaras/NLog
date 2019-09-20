@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__ANDROID__ && !__IOS__
+#if !SILVERLIGHT && !__ANDROID__ && !__IOS__ && !NETSTANDARD1_3
 // Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) so the BaseFileAppender class now throws an exception in the constructor.
 #define SupportsMutex
 #endif
@@ -40,14 +40,14 @@
 
 namespace NLog.Internal.FileAppenders
 {
-    using Common;
     using System;
     using System.IO;
     using System.Security;
     using System.Threading;
+    using NLog.Common;
 
     /// <summary>
-    /// Provides a multiprocess-safe atomic file appends while
+    /// Provides a multi process-safe atomic file appends while
     /// keeping the files open.
     /// </summary>
     /// <remarks>
@@ -63,7 +63,7 @@ namespace NLog.Internal.FileAppenders
         public static readonly IFileAppenderFactory TheFactory = new Factory();
 
         private FileStream _fileStream;
-        private FileCharacteristicsHelper _fileCharacteristicsHelper;
+        private readonly FileCharacteristicsHelper _fileCharacteristicsHelper;
         private Mutex _mutex;
 
         /// <summary>
@@ -118,7 +118,7 @@ namespace NLog.Internal.FileAppenders
             {
                 // ignore the exception, another process was killed without properly releasing the mutex
                 // the mutex has been acquired, so proceed to writing
-                // See: http://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
+                // See: https://msdn.microsoft.com/en-us/library/system.threading.abandonedmutexexception.aspx
             }
 
             try
@@ -126,10 +126,6 @@ namespace NLog.Internal.FileAppenders
                 _fileStream.Seek(0, SeekOrigin.End);
                 _fileStream.Write(bytes, offset, count);
                 _fileStream.Flush();
-                if (CaptureLastWriteTime)
-                {
-                    FileTouched();
-                }
             }
             finally
             {
@@ -142,42 +138,40 @@ namespace NLog.Internal.FileAppenders
         /// </summary>
         public override void Close()
         {
+            if (_mutex == null && _fileStream == null)
+            {
+                return;
+            }
+
             InternalLogger.Trace("Closing '{0}'", FileName);
-            if (_mutex != null)
+            try
             {
-                try
-                {
-                    _mutex.Close();
-                }
-                catch (Exception ex)
-                {
-                    // Swallow exception as the mutex now is in final state (abandoned instead of closed)
-                    InternalLogger.Warn(ex, "Failed to close mutex: '{0}'", FileName);
-                }
-                finally
-                {
-                    _mutex = null;
-                }
+                _mutex?.Close();
+            }
+            catch (Exception ex)
+            {
+                // Swallow exception as the mutex now is in final state (abandoned instead of closed)
+                InternalLogger.Warn(ex, "Failed to close mutex: '{0}'", FileName);
+            }
+            finally
+            {
+                _mutex = null;
             }
 
-            if (_fileStream != null)
+            try
             {
-                try
-                {
-                    _fileStream.Close();
-                }
-                catch (Exception ex)
-                {
-                    // Swallow exception as the file-stream now is in final state (broken instead of closed)
-                    InternalLogger.Warn(ex, "Failed to close file: '{0}'", FileName);
-                }
-                finally
-                {
-                    _fileStream = null;
-                }
+                _fileStream?.Close();
             }
-
-            FileTouched();
+            catch (Exception ex)
+            {
+                // Swallow exception as the file-stream now is in final state (broken instead of closed)
+                InternalLogger.Warn(ex, "Failed to close file: '{0}'", FileName);
+                AsyncHelpers.WaitForDelay(TimeSpan.FromMilliseconds(1));    // Artificial delay to avoid hammering a bad file location
+            }
+            finally
+            {
+                _fileStream = null;
+            }
         }
 
         /// <summary>
@@ -199,18 +193,7 @@ namespace NLog.Internal.FileAppenders
         }
 
         /// <summary>
-        /// Gets the last time the file associated with the appeander is written. The time returned is in Coordinated 
-        /// Universal Time [UTC] standard.
-        /// </summary>
-        /// <returns>The time the file was last written to.</returns>
-        public override DateTime? GetFileLastWriteTimeUtc()
-        {
-            var fileChars = GetFileCharacteristics();
-            return fileChars.LastWriteTimeUtc;
-        }
-
-        /// <summary>
-        /// Gets the length in bytes of the file associated with the appeander.
+        /// Gets the length in bytes of the file associated with the appender.
         /// </summary>
         /// <returns>A long value representing the length of the file in bytes.</returns>
         public override long? GetFileLength()

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !NETSTANDARD1_5
+#if !SILVERLIGHT && !NETSTANDARD1_0
 
 namespace NLog.LayoutRenderers
 {
@@ -39,97 +39,81 @@ namespace NLog.LayoutRenderers
     using System.ComponentModel;
     using System.Security.Principal;
     using System.Text;
+    using NLog.Config;
+	using NLog.Internal;
 
     /// <summary>
     /// Thread identity information (name and authentication information).
     /// </summary>
     [LayoutRenderer("identity")]
+    [ThreadSafe]
     public class IdentityLayoutRenderer : LayoutRenderer
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="IdentityLayoutRenderer" /> class.
-        /// </summary>
-        public IdentityLayoutRenderer()
-        {
-            Name = true;
-            AuthType = true;
-            IsAuthenticated = true;
-            Separator = ":";
-        }
-
         /// <summary>
         /// Gets or sets the separator to be used when concatenating 
         /// parts of identity information.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(":")]
-        public string Separator { get; set; }
+        public string Separator { get; set; } = ":";
 
         /// <summary>
         /// Gets or sets a value indicating whether to render Thread.CurrentPrincipal.Identity.Name.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(true)]
-        public bool Name { get; set; }
+        public bool Name { get; set; } = true;
 
         /// <summary>
         /// Gets or sets a value indicating whether to render Thread.CurrentPrincipal.Identity.AuthenticationType.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(true)]
-        public bool AuthType { get; set; }
+        public bool AuthType { get; set; } = true;
 
         /// <summary>
         /// Gets or sets a value indicating whether to render Thread.CurrentPrincipal.Identity.IsAuthenticated.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(true)]
-        public bool IsAuthenticated { get; set; }
+        public bool IsAuthenticated { get; set; } = true;
 
-        /// <summary>
-        /// Renders the specified identity information and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            IPrincipal principal = System.Threading.Thread.CurrentPrincipal;
-            if (principal != null)
+            IIdentity identity = GetValue();
+            if (identity != null)
             {
-                IIdentity identity = principal.Identity;
-                if (identity != null)
+                string separator = string.Empty;
+
+                if (IsAuthenticated)
                 {
-                    string separator = string.Empty;
+                    builder.Append(separator);
+                    separator = Separator;
 
-                    if (IsAuthenticated)
-                    {
-                        builder.Append(separator);
-                        separator = Separator;
+                    builder.Append(identity.IsAuthenticated ? "auth" : "notauth");
+                }
 
-                        if (identity.IsAuthenticated)
-                        {
-                            builder.Append("auth");
-                        }
-                        else
-                        {
-                            builder.Append("notauth");
-                        }
-                    }
+                if (AuthType)
+                {
+                    builder.Append(separator);
+                    separator = Separator;
+                    builder.Append(identity.AuthenticationType);
+                }
 
-                    if (AuthType)
-                    {
-                        builder.Append(separator);
-                        separator = Separator;
-                        builder.Append(identity.AuthenticationType);
-                    }
-
-                    if (Name)
-                    {
-                        builder.Append(separator);
-                        builder.Append(identity.Name);
-                    }
+                if (Name)
+                {
+                    builder.Append(separator);
+                    builder.Append(identity.Name);
                 }
             }
+
+        }
+
+        private static IIdentity GetValue()
+        {
+            var currentPrincipal = System.Threading.Thread.CurrentPrincipal;
+            return currentPrincipal?.Identity;
         }
     }
 }

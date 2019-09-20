@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using NLog.Config;
 
 namespace NLog.UnitTests.Targets
 {
@@ -68,6 +70,7 @@ namespace NLog.UnitTests.Targets
                     new LogEventInfo(LogLevel.Info, "Logger2", "message5").WithContinuation(exceptions.Add),
                     new LogEventInfo(LogLevel.Info, "Logger1", "message6").WithContinuation(exceptions.Add));
                 Assert.Equal(6, exceptions.Count);
+                target.Flush((ex) => { });
                 target.Close();
             }
             finally
@@ -114,6 +117,7 @@ namespace NLog.UnitTests.Targets
                     new LogEventInfo(LogLevel.Info, "Logger2", "message5").WithContinuation(exceptions.Add),
                     new LogEventInfo(LogLevel.Info, "Logger1", "message6").WithContinuation(exceptions.Add));
                 Assert.Equal(6, exceptions.Count);
+                target.Flush((ex) => { });
                 target.Close();
             }
             finally
@@ -191,10 +195,10 @@ namespace NLog.UnitTests.Targets
 
         internal static void ConsoleRaceCondtionIgnoreInnerTest(string configXml)
         {
-            LogManager.Configuration = CreateConfigurationFromString(configXml);
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(configXml);
 
             //   Console.Out.Writeline / Console.Error.Writeline could throw 'IndexOutOfRangeException', which is a bug. 
-            // See http://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
+            // See https://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
             // and https://connect.microsoft.com/VisualStudio/feedback/details/2057284/console-out-probable-i-o-race-condition-issue-in-multi-threaded-windows-service
             //             
             // Full error: 

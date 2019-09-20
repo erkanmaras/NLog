@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,6 +38,7 @@ namespace NLog.UnitTests
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Linq;
     using Xunit;
     using NLog.Common;
     using NLog.Config;
@@ -80,7 +81,7 @@ namespace NLog.UnitTests
             WeakReference wr = GetWeakReferenceToTemporaryLogger();
 
             // nobody's holding a reference to this Logger anymore, so GC.Collect(2) should free it
-            GC.Collect();
+            GC.Collect(2, GCCollectionMode.Forced, true);
             Assert.False(wr.IsAlive);
         }
 
@@ -97,25 +98,27 @@ namespace NLog.UnitTests
             FileTarget ft = new FileTarget();
             ft.FileName = ""; // invalid file name
             SimpleConfigurator.ConfigureForTargetLogging(ft);
-            LogManager.ThrowExceptions = false;
-            LogManager.GetLogger("A").Info("a");
-            LogManager.ThrowExceptions = true;
-            try
+
+            using (new NoThrowNLogExceptions())
             {
                 LogManager.GetLogger("A").Info("a");
-                Assert.True(false, "Should not be reached.");
+                LogManager.ThrowExceptions = true;
+                try
+                {
+                    LogManager.GetLogger("A").Info("a");
+                    Assert.True(false, "Should not be reached.");
+                }
+                catch
+                {
+                    Assert.True(true);
+                }
             }
-            catch
-            {
-                Assert.True(true);
-            }
-            LogManager.ThrowExceptions = false;
         }
 
         [Fact(Skip="Side effects to other unit tests.")]
         public void GlobalThresholdTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
                 <nlog globalThreshold='Info'>
                     <targets><target name='debug' type='Debug' layout='${message}' /></targets>
                     <rules>
@@ -163,7 +166,7 @@ namespace NLog.UnitTests
             // Disable/Enable logging should affect ALL the loggers.
             ILogger loggerA = LogManager.GetLogger("DisableLoggingTest_UsingStatement_A");
             ILogger loggerB = LogManager.GetLogger("DisableLoggingTest_UsingStatement_B");
-            LogManager.Configuration = CreateConfigurationFromString(LoggerConfig);
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(LoggerConfig);
 
             // The starting state for logging is enable.
             Assert.True(LogManager.IsLoggingEnabled());
@@ -217,7 +220,7 @@ namespace NLog.UnitTests
             // Disable/Enable logging should affect ALL the loggers.
             ILogger loggerA = LogManager.GetLogger("DisableLoggingTest_WithoutUsingStatement_A");
             ILogger loggerB = LogManager.GetLogger("DisableLoggingTest_WithoutUsingStatement_B");
-            LogManager.Configuration = CreateConfigurationFromString(LoggerConfig);
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(LoggerConfig);
 
             // The starting state for logging is enable.
             Assert.True(LogManager.IsLoggingEnabled());
@@ -256,7 +259,7 @@ namespace NLog.UnitTests
             LogManager.Configuration = null;
         }
 
-        private int _reloadCounter = 0;
+        private int _reloadCounter;
 
         private void WaitForConfigReload(int counter)
         {
@@ -468,8 +471,11 @@ namespace NLog.UnitTests
         [Fact]
         public void GetLogger_wrong_loggertype_should_continue()
         {
-            var instance = LogManager.GetLogger("a", typeof(ImNotALogger));
-            Assert.NotNull(instance);
+            using (new NoThrowNLogExceptions())
+            {
+                var instance = LogManager.GetLogger("a", typeof(ImNotALogger));
+                Assert.NotNull(instance);
+            }
         }
 
         /// <summary>
@@ -478,8 +484,11 @@ namespace NLog.UnitTests
         [Fact]
         public void GetLogger_wrong_loggertype_should_continue_even_if_class_is_static()
         {
-            var instance = LogManager.GetLogger("a", typeof(ImAStaticClass));
-            Assert.NotNull(instance);
+            using (new NoThrowNLogExceptions())
+            {
+                var instance = LogManager.GetLogger("a", typeof(ImAStaticClass));
+                Assert.NotNull(instance);
+            }
         }
 
         [Fact]
@@ -495,9 +504,9 @@ namespace NLog.UnitTests
         {
             LogManager.Configuration = new LoggingConfiguration();
             LogManager.ThrowExceptions = true;
-            LogManager.Configuration.AddTarget("memory", new NLog.Targets.Wrappers.BufferingTargetWrapper(new MemoryQueueTarget(500), 5, 1));
+            LogManager.Configuration.AddTarget("memory", new NLog.Targets.Wrappers.BufferingTargetWrapper(new MemoryTarget() { MaxLogsCount = 500 }, 5, 1));
             LogManager.Configuration.LoggingRules.Add(new LoggingRule("*", LogLevel.Debug, LogManager.Configuration.FindTargetByName("memory")));
-            LogManager.Configuration.AddTarget("memory2", new NLog.Targets.Wrappers.BufferingTargetWrapper(new MemoryQueueTarget(500), 5, 1));
+            LogManager.Configuration.AddTarget("memory2", new NLog.Targets.Wrappers.BufferingTargetWrapper(new MemoryTarget() { MaxLogsCount = 500 }, 5, 1));
             LogManager.Configuration.LoggingRules.Add(new LoggingRule("*", LogLevel.Debug, LogManager.Configuration.FindTargetByName("memory2")));
             var stopFlag = false;
             var exceptionThrown = false;
@@ -519,17 +528,16 @@ namespace NLog.UnitTests
         [Fact]
         public void ThreadSafe_getCurrentClassLogger_test()
         {
-            MemoryQueueTarget mTarget = new MemoryQueueTarget(1000);
-            MemoryQueueTarget mTarget2 = new MemoryQueueTarget(1000);
+            MemoryTarget mTarget = new MemoryTarget() { Name = "memory", MaxLogsCount = 1000 };
+            MemoryTarget mTarget2 = new MemoryTarget() { Name = "memory2", MaxLogsCount = 1000 };
 
             var task1 = Task.Run(() =>
             {
                 //need for init
                 LogManager.Configuration = new LoggingConfiguration();
-                LogManager.ThrowExceptions = true;
 
-                LogManager.Configuration.AddTarget("memory", mTarget);
-                LogManager.Configuration.LoggingRules.Add(new LoggingRule("*", LogLevel.Debug, mTarget));
+                LogManager.Configuration.AddTarget(mTarget.Name, mTarget);
+                LogManager.Configuration.AddRuleForAllLevels(mTarget.Name);
                 System.Threading.Thread.Sleep(1);
                 LogManager.ReconfigExistingLoggers();
                 System.Threading.Thread.Sleep(1);
@@ -538,8 +546,8 @@ namespace NLog.UnitTests
 
             var task2 = task1.ContinueWith((t) =>
             {
-                LogManager.Configuration.AddTarget("memory2", mTarget2);
-                LogManager.Configuration.LoggingRules.Add(new LoggingRule("*", LogLevel.Debug, mTarget2));
+                LogManager.Configuration.AddTarget(mTarget2.Name, mTarget2);
+                LogManager.Configuration.AddRuleForAllLevels(mTarget2.Name);
                 System.Threading.Thread.Sleep(1);
                 LogManager.ReconfigExistingLoggers();
                 System.Threading.Thread.Sleep(1);
@@ -579,57 +587,40 @@ namespace NLog.UnitTests
             Assert.NotEqual(0, mTarget.Logs.Count + mTarget2.Logs.Count);
         }
 
-        /// <summary>
-        /// target for <see cref="ThreadSafe_getCurrentClassLogger_test"/>
-        /// </summary>
-        [Target("Memory")]
-        public sealed class MemoryQueueTarget : TargetWithLayout
+        [Fact]
+        public void RemovedTargetShouldNotLog()
         {
-            private int maxSize;
+            var config = new LoggingConfiguration();
+            var targetA = new MemoryTarget("TargetA") { Layout = "A | ${message}", MaxLogsCount = 1 };
+            var targetB = new MemoryTarget("TargetB") { Layout = "B | ${message}", MaxLogsCount = 1 };
+            config.AddRule(LogLevel.Debug, LogLevel.Fatal, targetA);
+            config.AddRule(LogLevel.Debug, LogLevel.Fatal, targetB);
 
-            public MemoryQueueTarget() : this(1)
-            {
-            }
+            LogManager.Configuration = config;
 
-            public MemoryQueueTarget(string name)
-            {
-                Name = name;
-            }
+            Assert.Equal(new[] { "TargetA", "TargetB" }, LogManager.Configuration.ConfiguredNamedTargets.Select(target => target.Name));
 
-            public MemoryQueueTarget(int size)
-            {
-                maxSize = size;
-            }
+            Assert.NotNull(LogManager.Configuration.FindTargetByName("TargetA"));
+            Assert.NotNull(LogManager.Configuration.FindTargetByName("TargetB"));
 
-            protected override void InitializeTarget()
-            {
-                base.InitializeTarget();
-                Logs = new Queue<string>(maxSize);
-            }
+            var logger = LogManager.GetCurrentClassLogger();
+            logger.Info("Hello World");
 
-            protected override void CloseTarget()
-            {
-                base.CloseTarget();
-                Logs = null;
-            }
+            Assert.Equal("A | Hello World", targetA.Logs.LastOrDefault());
+            Assert.Equal("B | Hello World", targetB.Logs.LastOrDefault());
 
-            internal Queue<string> Logs { get; private set; }
+            // Remove the first target from the configuration
+            LogManager.Configuration.RemoveTarget("TargetA");
 
-            protected override void Write(LogEventInfo logEvent)
-            {
-                if (Logs == null)
-                    throw new ObjectDisposedException("MemoryQueueTarget");
+            Assert.Equal(new[] { "TargetB" }, LogManager.Configuration.ConfiguredNamedTargets.Select(target => target.Name));
 
-                string msg = Layout.Render(logEvent);
-                if (msg.Length > 100)
-                    msg = msg.Substring(0, 100) + "...";
+            Assert.Null(LogManager.Configuration.FindTargetByName("TargetA"));
+            Assert.NotNull(LogManager.Configuration.FindTargetByName("TargetB"));
 
-                Logs.Enqueue(msg);
-                while (Logs.Count > maxSize)
-                {
-                    Logs.Dequeue();
-                }
-            }
+            logger.Info("Goodbye World");
+
+            Assert.Equal("A | Hello World", targetA.Logs.LastOrDefault());  // Flushed and closed
+            Assert.Equal("B | Goodbye World", targetB.Logs.LastOrDefault());
         }
     }
 }

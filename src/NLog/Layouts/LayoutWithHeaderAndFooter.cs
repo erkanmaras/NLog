@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,14 +33,16 @@
 
 namespace NLog.Layouts
 {
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// A specialized layout that supports header and footer.
     /// </summary>
     [Layout("LayoutWithHeaderAndFooter")]
     [ThreadAgnostic]
+    [ThreadSafe]
+    [AppDomainFixedOutput]
     public class LayoutWithHeaderAndFooter : Layout
     {
         /// <summary>

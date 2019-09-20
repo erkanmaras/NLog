@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,13 +35,16 @@ namespace NLog.Internal.NetworkSenders
 {
     using System;
     using System.Net;
-    using Common;
 
     /// <summary>
     /// Network sender which uses HTTP or HTTPS POST.
     /// </summary>
-    internal class HttpNetworkSender : NetworkSender
+    internal class HttpNetworkSender : QueuedNetworkSender
     {
+        private readonly Uri _addressUri;
+
+        internal IWebRequestFactory HttpRequestFactory { get; set; } = WebRequestFactory.Instance;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="HttpNetworkSender"/> class.
         /// </summary>
@@ -49,19 +52,17 @@ namespace NLog.Internal.NetworkSenders
         public HttpNetworkSender(string url)
             : base(url)
         {
+            _addressUri = new Uri(Address);
         }
 
-        /// <summary>
-        /// Actually sends the given text over the specified protocol.
-        /// </summary>
-        /// <param name="bytes">The bytes to be sent.</param>
-        /// <param name="offset">Offset in buffer.</param>
-        /// <param name="length">Number of bytes to send.</param>
-        /// <param name="asyncContinuation">The async continuation to be invoked after the buffer has been sent.</param>
-        /// <remarks>To be overridden in inheriting classes.</remarks>
-        protected override void DoSend(byte[] bytes, int offset, int length, AsyncContinuation asyncContinuation)
+        protected override void BeginRequest(NetworkRequestArgs eventArgs)
         {
-            var webRequest = WebRequest.Create(new Uri(Address));
+            var asyncContinuation = eventArgs.AsyncContinuation;
+            var bytes = eventArgs.RequestBuffer;
+            var offset = eventArgs.RequestBufferOffset;
+            var length = eventArgs.RequestBufferLength;
+
+            var webRequest = HttpRequestFactory.CreateWebRequest(_addressUri);
             webRequest.Method = "POST";
 
             AsyncCallback onResponse =
@@ -71,19 +72,20 @@ namespace NLog.Internal.NetworkSenders
                     {
                         using (var response = webRequest.EndGetResponse(r))
                         {
+                            // Response successfully read
                         }
 
                         // completed fine
-                        asyncContinuation(null);
+                        base.EndRequest(asyncContinuation, null);
                     }
                     catch (Exception ex)
                     {
-                        if (ex.MustBeRethrown())
+                        if (ex.MustBeRethrownImmediately())
                         {
-                            throw;
+                            throw; // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
                         }
 
-                        asyncContinuation(ex);
+                        base.EndRequest(_ => asyncContinuation(ex), null);    // pendingException = null to keep sender alive
                     }
                 };
 
@@ -106,7 +108,7 @@ namespace NLog.Internal.NetworkSenders
                             throw;
                         }
 
-                        asyncContinuation(ex);
+                        base.EndRequest(_ => asyncContinuation(ex), null);    // pendingException = null to keep sender alive
                     }
                 };
 

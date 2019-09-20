@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !NETSTANDARD
+#if !SILVERLIGHT && !NETSTANDARD1_0
 
 namespace NLog.Internal
 {
@@ -52,7 +52,9 @@ namespace NLog.Internal
         /// <summary>
         /// Sends a QUIT message to the SMTP server, gracefully ends the TCP connection, and releases all resources used by the current instance of the <see cref="T:System.Net.Mail.SmtpClient"/> class.
         /// </summary>
+#pragma warning disable 108
         public void Dispose()
+#pragma warning restore 108
         {
             // dispose was added in .NET Framework 4.0, previous frameworks don't need it but adding it here to make the 
             // user experience the same across all

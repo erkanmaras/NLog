@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,8 +35,8 @@ namespace NLog.Targets.Wrappers
 {
     using System;
     using System.Threading;
-    using Common;
-    using Internal;
+    using NLog.Common;
+    using NLog.Internal;
 
     /// <summary>
     /// Distributes log events to targets in a round-robin fashion.
@@ -60,8 +60,7 @@ namespace NLog.Targets.Wrappers
     [Target("RoundRobinGroup", IsCompound = true)]
     public class RoundRobinGroupTarget : CompoundTargetBase
     {
-        private int _currentTarget = 0;
-        private object _lockObject = new object();
+        private int _currentTarget = -1;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RoundRobinGroupTarget" /> class.
@@ -89,7 +88,16 @@ namespace NLog.Targets.Wrappers
         public RoundRobinGroupTarget(params Target[] targets)
             : base(targets)
         {
-            OptimizeBufferReuse = GetType() == typeof(RoundRobinGroupTarget);
+            OptimizeBufferReuse = GetType() == typeof(RoundRobinGroupTarget);   // Class not sealed, reduce breaking changes
+        }
+
+        /// <summary>
+        /// Ensures forwarding happens without holding lock
+        /// </summary>
+        /// <param name="logEvent"></param>
+        protected override void WriteAsyncThreadSafe(AsyncLogEventInfo logEvent)
+        {
+            Write(logEvent);
         }
 
         /// <summary>
@@ -112,14 +120,7 @@ namespace NLog.Targets.Wrappers
                 return;
             }
 
-            int selectedTarget;
-
-            lock (_lockObject)
-            {
-                selectedTarget = _currentTarget;
-                _currentTarget = (_currentTarget + 1) % Targets.Count;
-            }
-
+            int selectedTarget = (int)((uint)Interlocked.Increment(ref _currentTarget) % Targets.Count);
             Targets[selectedTarget].WriteAsyncLogEvent(logEvent);
         }
     }

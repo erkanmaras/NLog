@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -38,7 +38,6 @@ namespace NLog.LayoutRenderers
     using System.ComponentModel;
     using System.Text;
     using NLog.Common;
-    using NLog.Conditions;
     using NLog.Config;
     using NLog.Internal;
 
@@ -48,19 +47,22 @@ namespace NLog.LayoutRenderers
     /// </summary>
     [LayoutRenderer("exception")]
     [ThreadAgnostic]
-    public class ExceptionLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class ExceptionLayoutRenderer : LayoutRenderer, IRawValue
     {
         private string _format;
         private string _innerFormat = string.Empty;
         private readonly Dictionary<ExceptionRenderingFormat, Action<StringBuilder, Exception>> _renderingfunctions;
 
-        private static readonly Dictionary<String, ExceptionRenderingFormat> _formatsMapping = new Dictionary<string, ExceptionRenderingFormat>(StringComparer.OrdinalIgnoreCase)
+        private static readonly Dictionary<string, ExceptionRenderingFormat> _formatsMapping = new Dictionary<string, ExceptionRenderingFormat>(StringComparer.OrdinalIgnoreCase)
                                                                                                     {
                                                                                                         {"MESSAGE",ExceptionRenderingFormat.Message},
                                                                                                         {"TYPE", ExceptionRenderingFormat.Type},
                                                                                                         {"SHORTTYPE",ExceptionRenderingFormat.ShortType},
                                                                                                         {"TOSTRING",ExceptionRenderingFormat.ToString},
                                                                                                         {"METHOD",ExceptionRenderingFormat.Method},
+                                                                                                        {"TARGETSITE",ExceptionRenderingFormat.Method},
+                                                                                                        {"SOURCE",ExceptionRenderingFormat.Source},
                                                                                                         {"STACKTRACE", ExceptionRenderingFormat.StackTrace},
                                                                                                         {"DATA",ExceptionRenderingFormat.Data},
                                                                                                         {"@",ExceptionRenderingFormat.Serialize},
@@ -84,6 +86,7 @@ namespace NLog.LayoutRenderers
                                                                                                         {ExceptionRenderingFormat.ShortType, AppendShortType},
                                                                                                         {ExceptionRenderingFormat.ToString, AppendToString},
                                                                                                         {ExceptionRenderingFormat.Method, AppendMethod},
+                                                                                                        {ExceptionRenderingFormat.Source, AppendSource},
                                                                                                         {ExceptionRenderingFormat.StackTrace, AppendStackTrace},
                                                                                                         {ExceptionRenderingFormat.Data, AppendData},
                                                                                                         {ExceptionRenderingFormat.Serialize, AppendSerializeObject},
@@ -177,35 +180,54 @@ namespace NLog.LayoutRenderers
             private set;
         }
 
-        /// <summary>
-        /// Renders the specified exception information and appends it to the specified <see cref="StringBuilder" />.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            value = logEvent.Exception;
+            return true;
+        }
+
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
             Exception primaryException = logEvent.Exception;
             if (primaryException != null)
             {
-                AppendException(primaryException, Formats, builder);
-
                 int currentLevel = 0;
-                if (currentLevel < MaxInnerExceptionLevel)
-                {
-                    currentLevel = AppendInnerExceptionTree(primaryException, currentLevel, builder);
 
 #if !NET3_5 && !SILVERLIGHT4
-                    AggregateException asyncException = primaryException as AggregateException;
-                    if (asyncException != null)
+                if (logEvent.Exception is AggregateException aggregateException)
+                {
+                    aggregateException = aggregateException.Flatten();
+                    primaryException = GetPrimaryException(aggregateException);
+                    AppendException(primaryException, Formats, builder);
+                    if (currentLevel < MaxInnerExceptionLevel)
                     {
-                        AppendAggregateException(asyncException, currentLevel, builder);
+                        currentLevel = AppendInnerExceptionTree(primaryException, currentLevel, builder);
+                        if (currentLevel < MaxInnerExceptionLevel && aggregateException.InnerExceptions?.Count > 1)
+                        {
+                            AppendAggregateException(aggregateException, currentLevel, builder);
+                        }
                     }
+                }
+                else
 #endif
+                {
+                    AppendException(primaryException, Formats, builder);
+                    if (currentLevel < MaxInnerExceptionLevel)
+                    {
+                        AppendInnerExceptionTree(primaryException, currentLevel, builder);
+                    }
                 }
             }
         }
 
 #if !NET3_5 && !SILVERLIGHT4
+        private static Exception GetPrimaryException(AggregateException aggregateException)
+        {
+            return aggregateException.InnerExceptions.Count == 1 ? aggregateException.InnerExceptions[0] : aggregateException;
+        }
+
         private void AppendAggregateException(AggregateException primaryException, int currentLevel, StringBuilder builder)
         {
             var asyncException = primaryException.Flatten();
@@ -252,7 +274,7 @@ namespace NLog.LayoutRenderers
             AppendException(currentException, InnerFormats ?? Formats, builder);
         }
 
-        private void AppendException(Exception currentException, List<ExceptionRenderingFormat> renderFormats, StringBuilder builder)
+        private void AppendException(Exception currentException, IEnumerable<ExceptionRenderingFormat> renderFormats, StringBuilder builder)
         {
             int orgLength = builder.Length;
             foreach (ExceptionRenderingFormat renderingFormat in renderFormats)
@@ -301,13 +323,10 @@ namespace NLog.LayoutRenderers
         /// <param name="ex">The Exception whose method name should be appended.</param>        
         protected virtual void AppendMethod(StringBuilder sb, Exception ex)
         {
-#if SILVERLIGHT || NETSTANDARD1_5
+#if SILVERLIGHT || NETSTANDARD1_0
             sb.Append(ParseMethodNameFromStackTrace(ex.StackTrace));
 #else
-            if (ex.TargetSite != null)
-            {
-                sb.Append(ex.TargetSite.ToString());
-            }
+            sb.Append(ex.TargetSite?.ToString());
 #endif
         }
 
@@ -318,8 +337,7 @@ namespace NLog.LayoutRenderers
         /// <param name="ex">The Exception whose stack trace should be appended.</param>        
         protected virtual void AppendStackTrace(StringBuilder sb, Exception ex)
         {
-            if (!string.IsNullOrEmpty(ex.StackTrace))
-                sb.Append(ex.StackTrace);
+            sb.Append(ex.StackTrace);
         }
 
         /// <summary>
@@ -353,6 +371,18 @@ namespace NLog.LayoutRenderers
         }
 
         /// <summary>
+        /// Appends the application source of an Exception to the specified <see cref="StringBuilder" />.
+        /// </summary>
+        /// <param name="sb">The <see cref="StringBuilder"/> to append the rendered data to.</param>
+        /// <param name="ex">The Exception whose source should be appended.</param>
+        protected virtual void AppendSource(StringBuilder sb, Exception ex)
+        {
+#if !SILVERLIGHT
+            sb.Append(ex.Source);
+#endif
+        }
+
+        /// <summary>
         /// Appends the contents of an Exception's Data property to the specified <see cref="StringBuilder" />.
         /// </summary>
         /// <param name="sb">The <see cref="StringBuilder"/> to append the rendered data to.</param>
@@ -366,7 +396,6 @@ namespace NLog.LayoutRenderers
                 {
                     sb.Append(separator);
                     sb.AppendFormat("{0}: {1}", key, ex.Data[key]);
-
                     separator = ExceptionDataSeparator;
                 }
             }
@@ -379,7 +408,7 @@ namespace NLog.LayoutRenderers
         /// <param name="ex">The Exception whose properties should be appended.</param>
         protected virtual void AppendSerializeObject(StringBuilder sb, Exception ex)
         {
-            ConfigurationItemFactory.Default.ValueSerializer.SerializeObject(ex, null, null, sb);
+            ConfigurationItemFactory.Default.ValueFormatter.FormatValue(ex, null, MessageTemplates.CaptureType.Serialize, null, sb);
         }
 
         /// <summary>
@@ -390,7 +419,7 @@ namespace NLog.LayoutRenderers
         private static List<ExceptionRenderingFormat> CompileFormat(string formatSpecifier)
         {
             List<ExceptionRenderingFormat> formats = new List<ExceptionRenderingFormat>();
-            string[] parts = formatSpecifier.Replace(" ", string.Empty).Split(new string[] { "," }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = formatSpecifier.SplitAndTrimTokens(',');
 
             foreach (string s in parts)
             {
@@ -407,7 +436,7 @@ namespace NLog.LayoutRenderers
             return formats;
         }
 
-#if SILVERLIGHT || NETSTANDARD1_5
+#if SILVERLIGHT || NETSTANDARD1_0
         /// <summary>
         /// Find name of method on stracktrace.
         /// </summary>

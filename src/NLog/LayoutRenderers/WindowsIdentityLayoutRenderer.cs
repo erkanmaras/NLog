@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,18 +31,20 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !NETSTANDARD1_5
+#if !SILVERLIGHT && (!NETSTANDARD || WindowsIdentityPackage)
 
 namespace NLog.LayoutRenderers
 {
     using System.ComponentModel;
     using System.Security.Principal;
     using System.Text;
+    using NLog.Config;
 
     /// <summary>
     /// Thread Windows identity information (username).
     /// </summary>
     [LayoutRenderer("windows-identity")]
+    [ThreadSafe]
     public class WindowsIdentityLayoutRenderer : LayoutRenderer
     {
         /// <summary>
@@ -75,31 +77,14 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            WindowsIdentity currentIdentity = WindowsIdentity.GetCurrent();
+            var currentIdentity = GetValue();
             if (currentIdentity != null)
             {
-                string output = string.Empty;
+                string output;
 
                 if (UserName)
                 {
-                    if (Domain)
-                    {
-                        // username && domain
-                        output = currentIdentity.Name;
-                    }
-                    else
-                    {
-                        // user name but no domain
-                        int pos = currentIdentity.Name.LastIndexOf('\\');
-                        if (pos >= 0)
-                        {
-                            output = currentIdentity.Name.Substring(pos + 1);
-                        }
-                        else
-                        {
-                            output = currentIdentity.Name;
-                        }
-                    }
+                    output = Domain ? GetUserNameWithDomain(currentIdentity) : GetUserNameWithoutDomain(currentIdentity);
                 }
                 else
                 {
@@ -110,19 +95,54 @@ namespace NLog.LayoutRenderers
                         return;
                     }
 
-                    int pos = currentIdentity.Name.IndexOf('\\');
-                    if (pos >= 0)
-                    {
-                        output = currentIdentity.Name.Substring(0, pos);
-                    }
-                    else
-                    {
-                        output = currentIdentity.Name;
-                    }
+                    output = GetDomainOnly(currentIdentity);
                 }
 
                 builder.Append(output);
             }
+        }
+
+        private static string GetDomainOnly(WindowsIdentity currentIdentity)
+        {
+            string output;
+            int pos = currentIdentity.Name.IndexOf('\\');
+            if (pos >= 0)
+            {
+                output = currentIdentity.Name.Substring(0, pos);
+            }
+            else
+            {
+                output = currentIdentity.Name;
+            }
+
+            return output;
+        }
+
+        private static string GetUserNameWithoutDomain(WindowsIdentity currentIdentity)
+        {
+            string output;
+            int pos = currentIdentity.Name.LastIndexOf('\\');
+            if (pos >= 0)
+            {
+                output = currentIdentity.Name.Substring(pos + 1);
+            }
+            else
+            {
+                output = currentIdentity.Name;
+            }
+
+            return output;
+        }
+
+        private static string GetUserNameWithDomain(WindowsIdentity currentIdentity)
+        {
+            return currentIdentity.Name;
+        }
+
+        private static WindowsIdentity GetValue()
+        {
+            WindowsIdentity currentIdentity = WindowsIdentity.GetCurrent();
+            return currentIdentity;
         }
     }
 }

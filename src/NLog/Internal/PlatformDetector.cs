@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,9 +31,17 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+#if !SILVERLIGHT && !__ANDROID__ && !__IOS__ && !NETSTANDARD1_3
+// Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) 
+#define SupportsMutex
+#endif
+
 namespace NLog.Internal
 {
     using System;
+    using System.Security;
+    using NLog.Common;
+    using NLog.Internal.FileAppenders;
 
     /// <summary>
     /// Detects the platform the NLog is running on.
@@ -41,31 +49,27 @@ namespace NLog.Internal
     internal static class PlatformDetector
     {
         private static RuntimeOS currentOS = GetCurrentRuntimeOS();
-        
+
         /// <summary>
         /// Gets the current runtime OS.
         /// </summary>
         public static RuntimeOS CurrentOS => currentOS;
 
         /// <summary>
-        /// Gets a value indicating whether current OS is a desktop version of Windows.
-        /// </summary>
-        public static bool IsDesktopWin32 => currentOS == RuntimeOS.Windows || currentOS == RuntimeOS.WindowsNT;
-
-        /// <summary>
         /// Gets a value indicating whether current OS is Win32-based (desktop or mobile).
         /// </summary>
-        public static bool IsWin32 => currentOS == RuntimeOS.Windows || currentOS == RuntimeOS.WindowsNT || currentOS == RuntimeOS.WindowsCE;
+        public static bool IsWin32 => currentOS == RuntimeOS.Windows || currentOS == RuntimeOS.WindowsNT;
 
         /// <summary>
         /// Gets a value indicating whether current OS is Unix-based.
         /// </summary>
-        public static bool IsUnix => currentOS == RuntimeOS.Unix;
+        public static bool IsUnix => currentOS == RuntimeOS.Linux || currentOS == RuntimeOS.MacOSX;
 
         /// <summary>
         /// Gets a value indicating whether current runtime is Mono-based
         /// </summary>
-        public static bool IsMono => Type.GetType("Mono.Runtime") != null;
+        public static bool IsMono => _isMono ?? (_isMono = Type.GetType("Mono.Runtime") != null).Value;
+        private static bool? _isMono;
 
         /// <summary>
         /// Gets a value indicating whether current runtime supports use of mutex
@@ -75,39 +79,75 @@ namespace NLog.Internal
             get
             {
 #if NETSTANDARD1_5
-                return true;
-#elif !SILVERLIGHT && !__ANDROID__ && !__IOS__
+                return RunTimeSupportsSharableMutex;
+#elif !SILVERLIGHT && !__ANDROID__ && !__IOS__ && !NETSTANDARD1_3
                 // Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) 
                 if (IsMono && Environment.Version.Major < 4)
                     return false;   // MONO ver. 4 is needed for named Mutex to work
                 else
-                    return true;
+                    return RunTimeSupportsSharableMutex;
 #else
                 return false;
 #endif
             }
         }
 
+        /// <summary>
+        ///  Will creating a mutex succeed runtime?
+        /// "Cached" detection
+        /// </summary>
+        private static bool? runTimeSupportsSharableMutex;
+
+        /// <summary>
+        /// Will creating a mutex succeed runtime?
+        /// </summary>
+        private static bool RunTimeSupportsSharableMutex
+        {
+            get
+            {
+                if (runTimeSupportsSharableMutex.HasValue)
+                {
+                    return runTimeSupportsSharableMutex.Value;
+                }
+
+
+                try
+                {
+#if SupportsMutex
+                    var mutex = BaseMutexFileAppender.ForceCreateSharableMutex("NLogMutexTester");
+                    mutex.Close(); //"dispose"
+
+                    runTimeSupportsSharableMutex = true;
+#else
+                    runTimeSupportsSharableMutex = false;
+#endif
+                }
+                catch (Exception ex)
+                {
+                    InternalLogger.Debug(ex, "Failed to create sharable mutex processes");
+                    runTimeSupportsSharableMutex = false;
+                }
+
+                return runTimeSupportsSharableMutex.Value;
+            }
+
+        }
+
         private static RuntimeOS GetCurrentRuntimeOS()
         {
-#if NETSTANDARD1_5
+#if NETSTANDARD
             if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
                 return RuntimeOS.Windows;
             else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
-                return RuntimeOS.Unix;
+                return RuntimeOS.MacOSX;
             else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux))
-                return RuntimeOS.Unix;
+                return RuntimeOS.Linux;
             return RuntimeOS.Unknown;
 #else
             PlatformID platformID = Environment.OSVersion.Platform;
             if ((int)platformID == 4 || (int)platformID == 128)
             {
-                return RuntimeOS.Unix;
-            }
-
-            if ((int)platformID == 3)
-            {
-                return RuntimeOS.WindowsCE;
+                return RuntimeOS.Linux;
             }
 
             if (platformID == PlatformID.Win32Windows)

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,13 +40,13 @@ namespace NLog.Config
     using System;
     using System.Collections.Generic;
     using System.Reflection;
-    using Conditions;
-    using Filters;
-    using Internal;
-    using LayoutRenderers;
-    using Layouts;
-    using Targets;
-    using Time;
+    using NLog.Conditions;
+    using NLog.Filters;
+    using NLog.Internal;
+    using NLog.LayoutRenderers;
+    using NLog.Layouts;
+    using NLog.Targets;
+    using NLog.Time;
 
     /// <summary>
     /// Provides registration information for named items (targets, layouts, layout renderers, etc.) managed by NLog.
@@ -55,7 +55,7 @@ namespace NLog.Config
     /// </summary>
     public class ConfigurationItemFactory
     {
-        private static ConfigurationItemFactory defaultInstance = null;
+        private static ConfigurationItemFactory _defaultInstance;
 
         private readonly IList<object> _allFactories;
         private readonly Factory<Target, TargetAttribute> _targets;
@@ -113,13 +113,8 @@ namespace NLog.Config
         /// </remarks>
         public static ConfigurationItemFactory Default
         {
-            get
-            {
-                if (defaultInstance == null)
-                    defaultInstance = BuildDefaultFactory();
-                return defaultInstance;
-            }
-            set => defaultInstance = value;
+            get => _defaultInstance ?? (_defaultInstance = BuildDefaultFactory());
+            set => _defaultInstance = value;
         }
 
         /// <summary>
@@ -145,7 +140,7 @@ namespace NLog.Config
         /// <summary>
         /// gets the <see cref="LayoutRenderer"/> factory
         /// </summary>
-        /// <remarks>not using <see cref="_layoutRenderers"/> due to backwardscomp.</remarks>
+        /// <remarks>not using <see cref="_layoutRenderers"/> due to backwards-compatibility.</remarks>
         /// <returns></returns>
         internal LayoutRendererFactory GetLayoutRenderers()
         {
@@ -192,18 +187,23 @@ namespace NLog.Config
         /// <summary>
         /// Gets or sets the string serializer to use with <see cref="LogEventInfo.MessageTemplateParameters"/>
         /// </summary>
-        public IValueSerializer ValueSerializer
+        public IValueFormatter ValueFormatter
         {
-            get => MessageTemplates.ValueSerializer.Instance;
-            set => MessageTemplates.ValueSerializer.Instance = value;
+            get => MessageTemplates.ValueFormatter.Instance;
+            set => MessageTemplates.ValueFormatter.Instance = value;
         }
 
         /// <summary>
-        /// Perform mesage template parsing and formatting of LogEvent messages (True = Always, False = Never, Null = Auto Detect)
+        /// Gets or sets the parameter converter to use with <see cref="DatabaseTarget"/>, <see cref="WebServiceTarget"/> or <see cref="TargetWithContext"/>
+        /// </summary>
+        public IPropertyTypeConverter PropertyTypeConverter { get; set; } = new PropertyTypeConverter();
+
+        /// <summary>
+        /// Perform message template parsing and formatting of LogEvent messages (True = Always, False = Never, Null = Auto Detect)
         /// </summary>
         /// <remarks>
         /// - Null (Auto Detect) : NLog-parser checks <see cref="LogEventInfo.Message"/> for positional parameters, and will then fallback to string.Format-rendering.
-        /// - True: Always performs the parsing of <see cref="LogEventInfo.Message"/> and rendering of <see cref="LogEventInfo.FormattedMessage"/> using the NLog-parser (Allows custom formatting with <see cref="ValueSerializer"/>)
+        /// - True: Always performs the parsing of <see cref="LogEventInfo.Message"/> and rendering of <see cref="LogEventInfo.FormattedMessage"/> using the NLog-parser (Allows custom formatting with <see cref="ValueFormatter"/>)
         /// - False: Always performs parsing and rendering using string.Format (Fastest if not using structured logging)
         /// </remarks>
         public bool? ParseMessageTemplates
@@ -257,7 +257,7 @@ namespace NLog.Config
             if (AssemblyLoading != null)
             {
                 var args = new AssemblyLoadingEventArgs(assembly);
-                AssemblyLoading.Invoke(this,args);
+                AssemblyLoading.Invoke(null, args);
                 if (args.Cancel)
                 {
                     InternalLogger.Info("Loading assembly '{0}' is canceled", assembly.FullName);
@@ -296,41 +296,55 @@ namespace NLog.Config
         /// Call the Preload method for <paramref name="type"/>. The Preload method must be static.
         /// </summary>
         /// <param name="type"></param>
-        private static void CallPreload(Type type)
+        private void CallPreload(Type type)
         {
-            if (type != null)
+            if (type == null)
             {
-                InternalLogger.Debug("Found for preload'{0}'", type.FullName);
-                var preloadMethod = type.GetMethod("Preload");
-                if (preloadMethod != null)
+                return;
+            }
+
+            InternalLogger.Debug("Found for preload'{0}'", type.FullName);
+            var preloadMethod = type.GetMethod("Preload");
+            if (preloadMethod != null)
+            {
+                if (preloadMethod.IsStatic)
                 {
-                    if (preloadMethod.IsStatic)
+
+                    InternalLogger.Debug("NLogPackageLoader contains Preload method");
+                    //only static, so first param null
+                    try
                     {
+                        var parameters = CreatePreloadParameters(preloadMethod, this);
 
-                        InternalLogger.Debug("NLogPackageLoader contains Preload method");
-                        //only static, so first param null
-                        try
-                        {
-                            preloadMethod.Invoke(null, null);
-                            InternalLogger.Debug("Preload succesfully invoked for '{0}'", type.FullName);
-                        }
-                        catch (Exception e)
-                        {
-                            InternalLogger.Warn(e,"Invoking Preload for '{0}' failed", type.FullName);
-                        }
+                        preloadMethod.Invoke(null, parameters);
+                        InternalLogger.Debug("Preload successfully invoked for '{0}'", type.FullName);
                     }
-                    else
+                    catch (Exception e)
                     {
-                        InternalLogger.Debug("NLogPackageLoader contains a preload method, but isn't static");
+                        InternalLogger.Warn(e, "Invoking Preload for '{0}' failed", type.FullName);
                     }
-
-
                 }
                 else
                 {
-                    InternalLogger.Debug("{0} doesn't contain Preload method", type.FullName);
+                    InternalLogger.Debug("NLogPackageLoader contains a preload method, but isn't static");
                 }
             }
+            else
+            {
+                InternalLogger.Debug("{0} doesn't contain Preload method", type.FullName);
+            }
+        }
+
+        private static object[] CreatePreloadParameters(MethodInfo preloadMethod, ConfigurationItemFactory configurationItemFactory)
+        {
+            var firstParam = preloadMethod.GetParameters().FirstOrDefault();
+            object[] parameters = null;
+            if (firstParam?.ParameterType == typeof(ConfigurationItemFactory))
+            {
+                parameters = new object[] {configurationItemFactory};
+            }
+
+            return parameters;
         }
 
         /// <summary>
@@ -366,64 +380,31 @@ namespace NLog.Config
             var nlogAssembly = typeof(ILogger).GetAssembly();
             var factory = new ConfigurationItemFactory(nlogAssembly);
             factory.RegisterExtendedItems();
-#if !SILVERLIGHT
 
+#if !SILVERLIGHT && !NETSTANDARD1_3
             try
             {
-                Uri assemblyCodeBase;
-                if (!Uri.TryCreate(nlogAssembly.CodeBase, UriKind.RelativeOrAbsolute, out assemblyCodeBase))
+                var assemblyLocation = string.Empty;
+                var extensionDlls = ArrayHelper.Empty<string>();
+                var fileLocations = GetAutoLoadingFileLocations();
+                foreach (var fileLocation in fileLocations)
                 {
-                    InternalLogger.Warn("No auto loading because assembly code base is unknown");
-                    return factory;
-                }
+                    if (string.IsNullOrEmpty(fileLocation.Key))
+                        continue;
 
-                var assemblyLocation = Path.GetDirectoryName(assemblyCodeBase.LocalPath);
-                if (assemblyLocation == null)
-                {
-                    InternalLogger.Warn("No auto loading because Nlog.dll location is unknown");
-                    return factory;
-                }
-                if (!Directory.Exists(assemblyLocation))
-                {
-                    InternalLogger.Warn("No auto loading because '{0}' doesn't exists", assemblyLocation);
-                    return factory;
-                }
+                    if (string.IsNullOrEmpty(assemblyLocation))
+                        assemblyLocation = fileLocation.Key;
 
-                var extensionDlls = Directory.GetFiles(assemblyLocation, "NLog*.dll")
-                    .Select(Path.GetFileName)
-                    .Where(x => !x.Equals("NLog.dll", StringComparison.OrdinalIgnoreCase))
-                    .Where(x => !x.Equals("NLog.UnitTests.dll", StringComparison.OrdinalIgnoreCase))
-                    .Where(x => !x.Equals("NLog.Extended.dll", StringComparison.OrdinalIgnoreCase))
-                    .Select(x => Path.Combine(assemblyLocation, x));
+                    extensionDlls = GetNLogExtensionFiles(fileLocation.Key);
+                    if (extensionDlls.Length > 0)
+                    {
+                        assemblyLocation = fileLocation.Key;
+                        break;
+                    }
+                }
 
                 InternalLogger.Debug("Start auto loading, location: {0}", assemblyLocation);
-                foreach (var extensionDll in extensionDlls)
-                {
-                    InternalLogger.Info("Auto loading assembly file: {0}", extensionDll);
-                    var success = false;
-                    try
-                    {
-                        var extensionAssembly = AssemblyHelpers.LoadFromPath(extensionDll);
-                        InternalLogger.LogAssemblyVersion(extensionAssembly);
-                        factory.RegisterItemsFromAssembly(extensionAssembly);
-                        success = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        if (ex.MustBeRethrownImmediately())
-                        {
-                            throw;
-                        }
-
-                        InternalLogger.Warn(ex, "Auto loading assembly file: {0} failed! Skipping this file.", extensionDll);
-                        //TODO NLog 5, check MustBeRethrown()
-                    }
-                    if (success)
-                    {
-                        InternalLogger.Info("Auto loading assembly file: {0} succeeded!", extensionDll);
-                    }
-
-                }
+                LoadNLogExtensionAssemblies(factory, nlogAssembly, extensionDlls);
             }
             catch (System.Security.SecurityException ex)
             {
@@ -443,39 +424,156 @@ namespace NLog.Config
             }
             InternalLogger.Debug("Auto loading done");
 #endif
-
             return factory;
         }
+
+#if !SILVERLIGHT && !NETSTANDARD1_3
+        private static void LoadNLogExtensionAssemblies(ConfigurationItemFactory factory, Assembly nlogAssembly, string[] extensionDlls)
+        {
+            HashSet<string> alreadyRegistered = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    nlogAssembly.FullName
+                };
+
+            foreach (var extensionDll in extensionDlls)
+            {
+                InternalLogger.Info("Auto loading assembly file: {0}", extensionDll);
+                var success = false;
+                try
+                {
+                    var extensionAssembly = AssemblyHelpers.LoadFromPath(extensionDll);
+                    InternalLogger.LogAssemblyVersion(extensionAssembly);
+                    factory.RegisterItemsFromAssembly(extensionAssembly);
+                    alreadyRegistered.Add(extensionAssembly.FullName);
+                    success = true;
+                }
+                catch (Exception ex)
+                {
+                    if (ex.MustBeRethrownImmediately())
+                    {
+                        throw;
+                    }
+
+                    InternalLogger.Warn(ex, "Auto loading assembly file: {0} failed! Skipping this file.", extensionDll);
+                    //TODO NLog 5, check MustBeRethrown()
+                }
+                if (success)
+                {
+                    InternalLogger.Info("Auto loading assembly file: {0} succeeded!", extensionDll);
+                }
+            }
+
+#if !NETSTANDARD1_0
+            var allAssemblies = LogFactory.CurrentAppDomain.GetAssemblies();
+            foreach (var assembly in allAssemblies)
+            {
+                if (assembly.FullName.StartsWith("NLog.", StringComparison.OrdinalIgnoreCase) && !alreadyRegistered.Contains(assembly.FullName))
+                {
+                    factory.RegisterItemsFromAssembly(assembly);
+                }
+
+                if (assembly.FullName.StartsWith("NLog.Extensions.Logging,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("NLog.Web,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("NLog.Web.AspNetCore,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("Microsoft.Extensions.Logging,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("Microsoft.Extensions.Logging.Abstractions,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("Microsoft.Extensions.Logging.Filter,", StringComparison.OrdinalIgnoreCase)
+                  || assembly.FullName.StartsWith("Microsoft.Logging,", StringComparison.OrdinalIgnoreCase))
+                {
+                    LogManager.AddHiddenAssembly(assembly);
+                }
+            }
+#endif
+        }
+
+        internal static IEnumerable<KeyValuePair<string, Assembly>> GetAutoLoadingFileLocations()
+        {
+            var nlogAssembly = typeof(ILogger).GetAssembly();
+            var assemblyLocation = PathHelpers.TrimDirectorySeparators(AssemblyHelpers.GetAssemblyFileLocation(nlogAssembly));
+            if (!string.IsNullOrEmpty(assemblyLocation))
+                yield return new KeyValuePair<string, Assembly>(assemblyLocation, nlogAssembly);
+
+            var entryAssembly = Assembly.GetEntryAssembly();
+            var entryLocation = PathHelpers.TrimDirectorySeparators(AssemblyHelpers.GetAssemblyFileLocation(Assembly.GetEntryAssembly()));
+            if (!string.IsNullOrEmpty(entryLocation) && !string.Equals(entryLocation, assemblyLocation, StringComparison.OrdinalIgnoreCase))
+                yield return new KeyValuePair<string, Assembly>(entryLocation, entryAssembly);
+
+            // TODO Consider to prioritize AppDomain.PrivateBinPath
+            var baseDirectory = PathHelpers.TrimDirectorySeparators(LogFactory.CurrentAppDomain.BaseDirectory);
+            InternalLogger.Debug("Auto loading based on AppDomain-BaseDirectory found location: {0}", baseDirectory);
+            if (!string.IsNullOrEmpty(baseDirectory) && !string.Equals(baseDirectory, assemblyLocation, StringComparison.OrdinalIgnoreCase))
+                yield return new KeyValuePair<string, Assembly>(baseDirectory, null);
+        }
+
+        private static string[] GetNLogExtensionFiles(string assemblyLocation)
+        {
+            try
+            {
+                InternalLogger.Debug("Search for auto loading files in location: {0}", assemblyLocation);
+                if (string.IsNullOrEmpty(assemblyLocation))
+                {
+                    return ArrayHelper.Empty<string>();
+                }
+
+                var extensionDlls = Directory.GetFiles(assemblyLocation, "NLog*.dll")
+                .Select(Path.GetFileName)
+                .Where(x => !x.Equals("NLog.dll", StringComparison.OrdinalIgnoreCase))
+                .Where(x => !x.Equals("NLog.UnitTests.dll", StringComparison.OrdinalIgnoreCase))
+                .Where(x => !x.Equals("NLog.Extended.dll", StringComparison.OrdinalIgnoreCase))
+                .Select(x => Path.Combine(assemblyLocation, x));
+                return extensionDlls.ToArray();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                InternalLogger.Warn(ex, "Skipping auto loading location because assembly directory does not exist: {0}", assemblyLocation);
+                if (ex.MustBeRethrown())
+                {
+                    throw;
+                }
+                return ArrayHelper.Empty<string>();
+            }
+            catch (System.Security.SecurityException ex)
+            {
+                InternalLogger.Warn(ex, "Skipping auto loading location because access not allowed to assembly directory: {0}", assemblyLocation);
+                if (ex.MustBeRethrown())
+                {
+                    throw;
+                }
+                return ArrayHelper.Empty<string>();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                InternalLogger.Warn(ex, "Skipping auto loading location because access not allowed to assembly directory: {0}", assemblyLocation);
+                if (ex.MustBeRethrown())
+                {
+                    throw;
+                }
+                return ArrayHelper.Empty<string>();
+            }
+        }
+#endif
 
         /// <summary>
         /// Registers items in NLog.Extended.dll using late-bound types, so that we don't need a reference to NLog.Extended.dll.
         /// </summary>
         private void RegisterExtendedItems()
         {
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD
             string suffix = typeof(ILogger).AssemblyQualifiedName;
             string myAssemblyName = "NLog,";
-            string extendedAssemblyName = "NLog.Extended,";
-            int p = suffix.IndexOf(myAssemblyName, StringComparison.OrdinalIgnoreCase);
+            var p = suffix?.IndexOf(myAssemblyName, StringComparison.OrdinalIgnoreCase);
             if (p >= 0)
             {
-                suffix = ", " + extendedAssemblyName + suffix.Substring(p + myAssemblyName.Length);
-
                 // register types
+                string extendedAssemblySuffix = ", NLog.Extended," + suffix.Substring(p.Value + myAssemblyName.Length);
                 string targetsNamespace = typeof(DebugTarget).Namespace;
-                _targets.RegisterNamedType("AspNetTrace", targetsNamespace + ".AspNetTraceTarget" + suffix);
-                _targets.RegisterNamedType("MSMQ", targetsNamespace + ".MessageQueueTarget" + suffix);
-                _targets.RegisterNamedType("AspNetBufferingWrapper", targetsNamespace + ".Wrappers.AspNetBufferingTargetWrapper" + suffix);
-
-                // register layout renderers
-                string layoutRenderersNamespace = typeof(MessageLayoutRenderer).Namespace;
-                _layoutRenderers.RegisterNamedType("appsetting", layoutRenderersNamespace + ".AppSettingLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-application", layoutRenderersNamespace + ".AspNetApplicationValueLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-request", layoutRenderersNamespace + ".AspNetRequestValueLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-sessionid", layoutRenderersNamespace + ".AspNetSessionIDLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-session", layoutRenderersNamespace + ".AspNetSessionValueLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-user-authtype", layoutRenderersNamespace + ".AspNetUserAuthTypeLayoutRenderer" + suffix);
-                _layoutRenderers.RegisterNamedType("aspnet-user-identity", layoutRenderersNamespace + ".AspNetUserIdentityLayoutRenderer" + suffix);
+                _targets.RegisterNamedType("MSMQ", targetsNamespace + ".MessageQueueTarget" + extendedAssemblySuffix);
             }
+#endif
+
+#if NET4_5 || NETSTANDARD
+            _layoutRenderers.RegisterNamedType("configsetting", "NLog.Extensions.Logging.ConfigSettingLayoutRenderer, NLog.Extensions.Logging");
+#endif
         }
     }
 }

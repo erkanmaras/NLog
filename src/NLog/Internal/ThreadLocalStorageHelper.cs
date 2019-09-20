@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -90,14 +90,18 @@ namespace NLog.Internal
                 v = new T();
                 dict.Add(slotNumber, v);
             }
-
             return (T)v;
 #elif NETSTANDARD || NET4_6
             var thread = slot as ThreadLocal<object>;
             if (thread == null)
-                throw new InvalidOperationException($"Expected ThreadLocal object. Received {slot.GetType()}.");
+                throw new InvalidOperationException($"Expected ThreadLocal object. Received {slot?.GetType()}.");
             if (!thread.IsValueCreated)
+            {
+                if (!create)
+                    return null;
+
                 thread.Value = new T();
+            }
             return (T)thread.Value;
 #else
             LocalDataStoreSlot localDataStoreSlot = (LocalDataStoreSlot)slot;

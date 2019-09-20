@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,15 +34,15 @@
 namespace NLog.LayoutRenderers
 {
     using System;
-    using System.Globalization;
     using System.Text;
-    using Config;
+    using NLog.Config;
 
     /// <summary>
     /// Log event context data.
     /// </summary>
     /// <remarks>This class was marked as obsolete on NLog 2.0 and it may be removed in a future release.</remarks>
     [LayoutRenderer("event-context")]
+    [MutableUnsafe]
     [Obsolete("Use EventPropertiesLayoutRenderer class instead. Marked obsolete on NLog 2.0")]
     public class EventContextLayoutRenderer : LayoutRenderer
     {

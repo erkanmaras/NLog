@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -44,7 +44,7 @@ namespace NLog.Targets.FileArchiveModes
     /// </summary>
     sealed class FileArchiveModeRolling : IFileArchiveMode
     {
-        public bool AttemptCleanupOnInitializeFile(string initializeFile, int maxArchiveFiles)
+        public bool AttemptCleanupOnInitializeFile(string archiveFilePath, int maxArchiveFiles)
         {
             return false;   // For historic reasons, then cleanup of rolling archives are not done on startup
         }
@@ -107,19 +107,16 @@ namespace NLog.Targets.FileArchiveModes
 
             existingArchiveFiles.Sort((x, y) => x.Sequence.CompareTo(y.Sequence));
 
-            if (maxArchiveFiles > 0)
+            if (maxArchiveFiles > 0 && existingArchiveFiles.Count > maxArchiveFiles)
             {
-                if (existingArchiveFiles.Count > maxArchiveFiles)
+                for (int i = 0; i < existingArchiveFiles.Count; i++)
                 {
-                    for (int i = 0; i < existingArchiveFiles.Count; i++)
-                    {
-                        if (existingArchiveFiles[i].Sequence == int.MinValue || existingArchiveFiles[i].Sequence == int.MaxValue)
-                            continue;
+                    if (existingArchiveFiles[i].Sequence == int.MinValue || existingArchiveFiles[i].Sequence == int.MaxValue)
+                        continue;
 
-                        if ((i + 1) > maxArchiveFiles)
-                        {
-                            yield return existingArchiveFiles[i];
-                        }
+                    if (i + 1 > maxArchiveFiles)
+                    {
+                        yield return existingArchiveFiles[i];
                     }
                 }
             }

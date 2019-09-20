@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,9 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Config;
+using NLog.Targets;
+
 namespace NLog.UnitTests.LogReceiverService
 {
     using System.Collections.Generic;
@@ -51,6 +54,44 @@ namespace NLog.UnitTests.LogReceiverService
     public class LogReceiverServiceTests : NLogTestBase
     {
         private const string logRecieverUrl = "http://localhost:8080/logrecievertest";
+
+
+
+#if !NETSTANDARD || WCF_SUPPORTED
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData(" ")]
+        [InlineData("message1")]
+        public void TranslateEventAndBack(string message)
+        {
+            // Arrange
+            var service = new LogReceiverWebServiceTarget {IncludeEventProperties = true};
+
+            var logEvent = new LogEventInfo(LogLevel.Debug, "logger1", message);
+
+            var nLogEvents = new NLogEvents
+            {
+                Strings = new StringCollection(),
+                LayoutNames = new StringCollection(),
+                BaseTimeUtc = DateTime.UtcNow.Ticks,
+                ClientName = "client1",
+                Events = new NLogEvent[0]
+
+            };
+            var dict2 = new Dictionary<string, int>();
+
+            // Act
+            var translateEvent = service.TranslateEvent(logEvent, nLogEvents, dict2);
+            var result = translateEvent.ToEventInfo(nLogEvents, "");
+
+            // Assert
+            Assert.Equal("logger1", result.LoggerName);
+            Assert.Equal(message, result.Message);
+
+        }
+#endif
+
 
         [Fact]
         public void ToLogEventInfoTest()
@@ -256,7 +297,7 @@ namespace NLog.UnitTests.LogReceiverService
 
         private void RealTestLogReciever(bool useOneWayContract, bool binaryEncode)
         {
-            LogManager.Configuration = CreateConfigurationFromString($@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString($@"
           <nlog throwExceptions='true'>
                 <targets>
                    <target type='LogReceiverService'
@@ -279,8 +320,7 @@ namespace NLog.UnitTests.LogReceiverService
             </nlog>");
 
 
-     
-            ExecLogRecieverAndCheck(ExecLogging1, CheckRecieved1, 2);
+            ExecLogRecieverAndCheck(ExecLogging1, CheckReceived1, 2);
 
         }
 
@@ -288,7 +328,7 @@ namespace NLog.UnitTests.LogReceiverService
         /// Create WCF service, logs and listen to the events
         /// </summary>
         /// <param name="logFunc">function for logging the messages</param>
-        /// <param name="logCheckFunc">function for checking the received messsages</param>
+        /// <param name="logCheckFunc">function for checking the received messages</param>
         /// <param name="messageCount">message count for wait for listen and checking</param>
         private void ExecLogRecieverAndCheck(Action<Logger> logFunc, Action<List<NLogEvents>> logCheckFunc, int messageCount)
         {
@@ -296,10 +336,18 @@ namespace NLog.UnitTests.LogReceiverService
             Uri baseAddress = new Uri(logRecieverUrl);
 
             // Create the ServiceHost.
-            using (ServiceHost host = new ServiceHost(typeof(LogRecieverMock), baseAddress))
+            var countdownEvent = new CountdownEvent(messageCount);
+            var logReceiverMock = new LogReceiverMock(countdownEvent);
+
+            using (ServiceHost host = new ServiceHost(logReceiverMock, baseAddress))
             {
+
+                var behaviour = host.Description.Behaviors.Find<ServiceBehaviorAttribute>();
+                behaviour.InstanceContextMode = InstanceContextMode.Single;
+
                 // Enable metadata publishing.
                 ServiceMetadataBehavior smb = new ServiceMetadataBehavior();
+                
                 smb.HttpGetEnabled = true;
 #if !MONO
                 smb.MetadataExporter.PolicyVersion = PolicyVersion.Policy15;
@@ -314,38 +362,31 @@ namespace NLog.UnitTests.LogReceiverService
 
                 //wait for 2 events
 
-                var countdownEvent = new CountdownEvent(messageCount);
-                //reset
-                LogRecieverMock.recievedEvents = new List<NLogEvents>();
-                LogRecieverMock.CountdownEvent = countdownEvent;
+              
 
                 var logger1 = LogManager.GetLogger("logger1");
                 logFunc(logger1);
 
                 countdownEvent.Wait(20000);
-                //we need some extra time for completion
-                Thread.Sleep(1000);
-                var recieved = LogRecieverMock.recievedEvents;
+               
+                var received = logReceiverMock.ReceivedEvents;
 
+                Assert.Equal(messageCount, received.Count);
 
-
-
-                Assert.Equal(messageCount, recieved.Count);
-
-                logCheckFunc(recieved);
+                logCheckFunc(received);
 
                 // Close the ServiceHost.
                 host.Close();
             }
         }
 
-        private static void CheckRecieved1(List<NLogEvents> recieved)
+        private static void CheckReceived1(List<NLogEvents> received)
         {
             //in some case the messages aren't retrieved in the right order when invoked in the same sec.
             //more important is that both are retrieved with the correct info
-            Assert.Equal(2, recieved.Count);
+            Assert.Equal(2, received.Count);
 
-            var logmessages = new HashSet<string> {recieved[0].ToEventInfo().First().Message, recieved[1].ToEventInfo().First().Message};
+            var logmessages = new HashSet<string> { received[0].ToEventInfo().First().Message, received[1].ToEventInfo().First().Message };
 
             Assert.True(logmessages.Contains("test 1"), "message 1 is missing");
             Assert.True(logmessages.Contains("test 2"), "message 2 is missing");
@@ -360,12 +401,18 @@ namespace NLog.UnitTests.LogReceiverService
             logger.Info(new InvalidConstraintException("boo"), "test 2");
         }
 
-        public class LogRecieverMock : ILogReceiverServer, ILogReceiverOneWayServer
+        public class LogReceiverMock : ILogReceiverServer, ILogReceiverOneWayServer
         {
 
-            public static CountdownEvent CountdownEvent;
+            public CountdownEvent CountdownEvent { get; }
 
-            public static List<NLogEvents> recievedEvents = new List<NLogEvents>();
+            /// <inheritdoc />
+            public LogReceiverMock(CountdownEvent countdownEvent)
+            {
+                CountdownEvent = countdownEvent;
+            }
+
+            public List<NLogEvents> ReceivedEvents { get; } = new List<NLogEvents>();
 
             /// <summary>
             /// Processes the log messages.
@@ -378,9 +425,7 @@ namespace NLog.UnitTests.LogReceiverService
                     throw new Exception("test not prepared well");
                 }
 
-
-
-                recievedEvents.Add(events);
+                ReceivedEvents.Add(events);
 
                 CountdownEvent.Signal();
             }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -47,26 +47,14 @@ namespace NLog.Internal
 
         internal static object CreateInstance(Type t)
         {
-#if NETSTANDARD1_5
             try
             {
                 return Activator.CreateInstance(t);
             }
-            catch (Exception)
+            catch (MissingMethodException exception)
             {
-                throw new NLogConfigurationException("Cannot access the constructor of type: " + t.FullName + ". Is the required permission granted?");
+                throw new NLogConfigurationException($"Cannot access the constructor of type: {t.FullName}. Is the required permission granted?", exception);
             }
-#else
-            ConstructorInfo constructor = t.GetConstructor(ArrayHelper.Empty<Type>());
-            if (constructor != null)
-            {
-                return constructor.Invoke(ArrayHelper.Empty<object>());
-            }
-            else
-            {
-                throw new NLogConfigurationException("Cannot access the constructor of type: " + t.FullName + ". Is the required permission granted?");
-            }
-#endif
         }
     }
 }

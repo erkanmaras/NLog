@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,14 +35,14 @@ namespace NLog.Conditions
 {
     using System;
     using System.Text;
-    using Internal;
+    using NLog.Internal;
 
     /// <summary>
     /// Hand-written tokenizer for conditions.
     /// </summary>
     internal sealed class ConditionTokenizer
     {
-        private static readonly ConditionTokenType[] charIndexToTokenType = BuildCharIndexToTokenType();
+        private static readonly ConditionTokenType[] CharIndexToTokenType = BuildCharIndexToTokenType();
         private readonly SimpleStringReader _stringReader;
 
         /// <summary>
@@ -55,12 +55,6 @@ namespace NLog.Conditions
             TokenType = ConditionTokenType.BeginningOfInput;
             GetNextToken();
         }
-
-        /// <summary>
-        /// Gets the token position.
-        /// </summary>
-        /// <value>The token position.</value>
-        public int TokenPosition { get; private set; }
 
         /// <summary>
         /// Gets the type of the token.
@@ -97,7 +91,7 @@ namespace NLog.Conditions
         {
             if (TokenType != tokenType)
             {
-                throw new ConditionParseException("Expected token of type: " + tokenType + ", got " + TokenType + " (" + TokenValue + ").");
+                throw new ConditionParseException($"Expected token of type: {tokenType}, got {TokenType} ({TokenValue}).");
             }
 
             GetNextToken();
@@ -133,12 +127,7 @@ namespace NLog.Conditions
                 return false;
             }
 
-            if (!TokenValue.Equals(keyword, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            return true;
+            return TokenValue.Equals(keyword, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -149,12 +138,7 @@ namespace NLog.Conditions
         /// </returns>
         public bool IsEOF()
         {
-            if (TokenType != ConditionTokenType.EndOfInput)
-            {
-                return false;
-            }
-
-            return true;
+            return TokenType == ConditionTokenType.EndOfInput;
         }
 
         /// <summary>
@@ -191,8 +175,6 @@ namespace NLog.Conditions
             }
 
             SkipWhitespace();
-
-            TokenPosition = TokenPosition;
 
             int i = PeekChar();
             if (i == -1)
@@ -238,7 +220,7 @@ namespace NLog.Conditions
 
             if (ch >= 32 && ch < 128)
             {
-                ConditionTokenType tt = charIndexToTokenType[ch];
+                ConditionTokenType tt = CharIndexToTokenType[ch];
 
                 if (tt != ConditionTokenType.Invalid)
                 {
@@ -248,10 +230,10 @@ namespace NLog.Conditions
                     return;
                 }
 
-                throw new ConditionParseException("Invalid punctuation: " + ch);
+                throw new ConditionParseException($"Invalid punctuation: {ch}");
             }
 
-            throw new ConditionParseException("Invalid token: " + ch);
+            throw new ConditionParseException($"Invalid token: {ch}");
         }
 
         /// <summary>
@@ -403,8 +385,7 @@ namespace NLog.Conditions
 
             foreach (CharToTokenType cht in charToTokenType)
             {
-                // Console.WriteLine("Setting up {0} to {1}", cht.ch, cht.tokenType);
-                result[(int)cht.Character] = cht.TokenType;
+                result[cht.Character] = cht.TokenType;
             }
 
             return result;
@@ -428,7 +409,7 @@ namespace NLog.Conditions
 
                 if (ch == '\'')
                 {
-                    if (PeekChar() == (int)'\'')
+                    if (PeekChar() == '\'')
                     {
                         sb.Append('\'');
                         ReadChar();

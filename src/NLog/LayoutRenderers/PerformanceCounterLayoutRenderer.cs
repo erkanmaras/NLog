@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,18 +35,24 @@
 
 namespace NLog.LayoutRenderers
 {
+    using System;
     using System.Diagnostics;
     using System.Globalization;
     using System.Text;
-    using Config;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Layouts;
 
     /// <summary>
     /// The performance counter.
     /// </summary>
     [LayoutRenderer("performancecounter")]
+    [ThreadSafe]
     public class PerformanceCounterLayoutRenderer : LayoutRenderer
     {
-        private PerformanceCounter perfCounter;
+        private PerformanceCounterCached _fixedPerformanceCounter;
+        private PerformanceCounterCached _performanceCounter;
 
         /// <summary>
         /// Gets or sets the name of the counter category.
@@ -66,53 +72,202 @@ namespace NLog.LayoutRenderers
         /// Gets or sets the name of the performance counter instance (e.g. this.Global_).
         /// </summary>
         /// <docgen category='Performance Counter Options' order='10' />
-        public string Instance { get; set; }
+        public string Instance
+        {
+            get { return _instance?.Text; }
+            set
+            {
+                _instance = value != null ? new SimpleLayout(value) : null;
+                ResetPerformanceCounters();
+            }
+        }
+        private SimpleLayout _instance;
 
         /// <summary>
         /// Gets or sets the name of the machine to read the performance counter from.
         /// </summary>
         /// <docgen category='Performance Counter Options' order='10' />
-        public string MachineName { get; set; }
+        public string MachineName
+        {
+            get { return _machineName?.Text; }
+            set
+            {
+                _machineName = value != null ? new SimpleLayout(value) : null;
+                ResetPerformanceCounters();
+            }
+        }
+        private SimpleLayout _machineName;
 
         /// <summary>
-        /// Initializes the layout renderer.
+        /// Format string for conversion from float to string.
         /// </summary>
+        /// <docgen category='Rendering Options' order='50' />
+        public string Format { get; set; }
+
+        /// <summary>
+        /// Gets or sets the culture used for rendering. 
+        /// </summary>
+        /// <docgen category='Rendering Options' order='100' />
+        public CultureInfo Culture { get; set; }
+
+        /// <inheritdoc />
         protected override void InitializeLayoutRenderer()
         {
             base.InitializeLayoutRenderer();
 
-            if (MachineName != null)
+            if (_instance == null && string.Equals(Category, "Process", StringComparison.OrdinalIgnoreCase))
             {
-                perfCounter = new PerformanceCounter(Category, Counter, Instance, MachineName);
+                _instance = GetCurrentProcessInstanceName(Category) ?? string.Empty;
             }
-            else
-            {
-                perfCounter = new PerformanceCounter(Category, Counter, Instance, true);
-            }
+
+            LookupPerformanceCounter(LogEventInfo.CreateNullEvent());
         }
 
-        /// <summary>
-        /// Closes the layout renderer.
-        /// </summary>
+        /// <inheritdoc />
         protected override void CloseLayoutRenderer()
         {
             base.CloseLayoutRenderer();
-            if (perfCounter != null)
+            _fixedPerformanceCounter?.Close();
+            _performanceCounter?.Close();
+            ResetPerformanceCounters();
+        }
+
+        /// <inheritdoc />
+        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            var performanceCounter = LookupPerformanceCounter(logEvent);
+            var formatProvider = GetFormatProvider(logEvent, Culture);
+            builder.Append(performanceCounter.GetValue().ToString(Format, formatProvider));
+        }
+
+        private void ResetPerformanceCounters()
+        {
+            _fixedPerformanceCounter = null;
+            _performanceCounter = null;
+        }
+
+        PerformanceCounterCached LookupPerformanceCounter(LogEventInfo logEventInfo)
+        {
+            var perfCounterCached = _fixedPerformanceCounter;
+            if (perfCounterCached != null)
+                return perfCounterCached;
+
+            perfCounterCached = _performanceCounter;
+            var machineName = _machineName?.Render(logEventInfo) ?? string.Empty;
+            var instanceName = _instance?.Render(logEventInfo) ?? string.Empty;
+            if (perfCounterCached != null && perfCounterCached.MachineName == machineName && perfCounterCached.InstanceName == instanceName)
             {
-                perfCounter.Close();
-                perfCounter = null;
+                return perfCounterCached;
             }
+
+            var perfCounter = CreatePerformanceCounter(machineName, instanceName);
+            perfCounterCached = new PerformanceCounterCached(machineName, instanceName, perfCounter);
+            if ((_machineName?.Text == null || _machineName.IsFixedText) && (_instance?.Text == null || _instance.IsFixedText))
+            {
+                _fixedPerformanceCounter = perfCounterCached;
+            }
+            else
+            {
+                _performanceCounter = perfCounterCached;
+            }
+            return perfCounterCached;
+        }
+
+        private PerformanceCounter CreatePerformanceCounter(string machineName, string instanceName)
+        {
+            if (!string.IsNullOrEmpty(machineName))
+            {
+                return new PerformanceCounter(Category, Counter, instanceName, machineName);
+            }
+
+            return new PerformanceCounter(Category, Counter, instanceName, true);
         }
 
         /// <summary>
-        /// Renders the specified environment variable and appends it to the specified <see cref="StringBuilder" />.
+        /// If having multiple instances with the same process-name, then they will get different instance names
         /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
-        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        private static string GetCurrentProcessInstanceName(string category)
         {
-            var formatProvider = GetFormatProvider(logEvent);
-            builder.Append(perfCounter.NextValue().ToString(formatProvider));
+            try
+            {
+                using (Process proc = Process.GetCurrentProcess())
+                {
+                    int pid = proc.Id;
+                    PerformanceCounterCategory cat = new PerformanceCounterCategory(category);
+                    foreach (string instanceValue in cat.GetInstanceNames())
+                    {
+                        using (PerformanceCounter cnt = new PerformanceCounter(category, "ID Process", instanceValue, true))
+                        {
+                            int val = (int)cnt.RawValue;
+                            if (val == pid)
+                            {
+                                return instanceValue;
+                            }
+                        }
+                    }
+
+                    InternalLogger.Debug("PerformanceCounter - Failed to auto detect current process instance. ProcessId={0}", pid);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ex.MustBeRethrown())
+                    throw;
+
+                InternalLogger.Warn(ex, "PerformanceCounter - Failed to auto detect current process instance.");
+            }
+            return string.Empty;
+        }
+
+        class PerformanceCounterCached
+        {
+            private readonly PerformanceCounter _perfCounter;
+            private readonly object _lockObject = new object();
+            private CounterSample _prevSample = CounterSample.Empty;
+            private CounterSample _nextSample = CounterSample.Empty;
+
+            public PerformanceCounterCached(string machineName, string instanceName, PerformanceCounter performanceCounter)
+            {
+                MachineName = machineName;
+                InstanceName = instanceName;
+                _perfCounter = performanceCounter;
+                GetValue(); // Prepare Performance Counter for CounterSample.Calculate
+            }
+
+            public string MachineName { get; }
+            public string InstanceName { get; }
+
+            public float GetValue()
+            {
+                lock (_lockObject)
+                {
+                    CounterSample currentSample = _perfCounter.NextSample();
+                    if (currentSample.SystemFrequency != 0)
+                    {
+                        // The recommended delay time between calls to the NextSample method is one second, to allow the counter to perform the next incremental read.
+                        float timeDifferenceSecs = (currentSample.TimeStamp - _nextSample.TimeStamp) / (float)currentSample.SystemFrequency;
+                        if (timeDifferenceSecs > 0.5F || timeDifferenceSecs < -0.5F)
+                        {
+                            _prevSample = _nextSample;
+                            _nextSample = currentSample;
+                            if (_prevSample.Equals(CounterSample.Empty))
+                                _prevSample = currentSample;
+                        }
+                    }
+                    else
+                    {
+                        _prevSample = _nextSample;
+                        _nextSample = currentSample;
+                    }
+                    float sampleValue = CounterSample.Calculate(_prevSample, currentSample);
+                    return sampleValue;
+                }
+            }
+
+            public void Close()
+            {
+                _perfCounter.Close();
+            }
         }
     }
 }

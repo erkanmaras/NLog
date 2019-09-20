@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,13 +31,13 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__IOS__
+#if !SILVERLIGHT && !__IOS__ && !NETSTANDARD1_3
 
 namespace NLog.LayoutRenderers
 {
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The identifier of the current process.
@@ -45,16 +45,25 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("processid")]
     [AppDomainFixedOutput]
     [ThreadAgnostic]
-    public class ProcessIdLayoutRenderer : LayoutRenderer
+    [ThreadSafe]
+    public class ProcessIdLayoutRenderer : LayoutRenderer, IRawValue
     {
-        /// <summary>
-        /// Renders the current process ID.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            builder.AppendInvariant(ThreadIDHelper.Instance.CurrentProcessID);
+            builder.AppendInvariant(GetValue());
+        }
+
+        /// <inheritdoc />
+        bool IRawValue.TryGetRawValue(LogEventInfo logEvent, out object value)
+        {
+            value = GetValue();
+            return true;
+        }
+
+        private int GetValue()
+        {
+            return ProcessIDHelper.Instance.CurrentProcessID;
         }
     }
 }

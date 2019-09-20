@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -112,12 +112,7 @@ namespace NLog.Targets
         /// </returns>
         public bool CheckCondition(LogEventInfo logEvent)
         {
-            if (Condition == null)
-            {
-                return true;
-            }
-
-            return true.Equals(Condition.Evaluate(logEvent));
+            return Condition == null || true.Equals(Condition.Evaluate(logEvent));
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,14 +31,14 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__IOS__
+#if !SILVERLIGHT && !__IOS__ && !NETSTANDARD1_3
 
 namespace NLog.LayoutRenderers
 {
     using System.ComponentModel;
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The name of the current process.
@@ -46,6 +46,7 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("processname")]
     [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public class ProcessNameLayoutRenderer : LayoutRenderer
     {
         /// <summary>
@@ -62,14 +63,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            if (FullName)
-            {
-                builder.Append(ThreadIDHelper.Instance.CurrentProcessName);
-            }
-            else
-            {
-                builder.Append(ThreadIDHelper.Instance.CurrentProcessBaseName);
-            }
+            var output = FullName ? ProcessIDHelper.Instance.CurrentProcessFilePath : ProcessIDHelper.Instance.CurrentProcessBaseName;
+            builder.Append(output);
         }
     }
 }

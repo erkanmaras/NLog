@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,26 +31,31 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using NLog.Config;
+using System.Collections;
 
 namespace NLog.LayoutRenderers
 {
     using System;
-    using System.Globalization;
     using System.Text;
+    using System.Collections.Generic;
+    using System.ComponentModel;
+    using System.Linq;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Log event context data.
     /// </summary>
     [LayoutRenderer("all-event-properties")]
     [ThreadAgnostic]
+    [ThreadSafe]
+    [MutableUnsafe]
     public class AllEventPropertiesLayoutRenderer : LayoutRenderer
     {
         private string _format;
+        private string _beforeKey;
+        private string _afterKey;
+        private string _afterValue;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="AllEventPropertiesLayoutRenderer"/> class.
@@ -67,14 +72,23 @@ namespace NLog.LayoutRenderers
         /// <docgen category='Rendering Options' order='10' />
         public string Separator { get; set; }
 
+        /// <summary>
+        /// Get or set if empty values should be included.
+        ///
+        /// A value is empty when null or in case of a string, null or empty string.
+        /// </summary>
+        [DefaultValue(false)]
+        public bool IncludeEmptyValues { get; set; } = false;
+
 #if NET4_5
 
         /// <summary>
-        /// Also render the caller information attributes? (<see cref="CallerMemberNameAttribute"/>,
-        /// <see cref="CallerFilePathAttribute"/>, <see cref="CallerLineNumberAttribute"/>). 
+        /// Also render the caller information attributes? (<see cref="System.Runtime.CompilerServices.CallerMemberNameAttribute"/>,
+        /// <see cref="System.Runtime.CompilerServices.CallerFilePathAttribute"/>, <see cref="System.Runtime.CompilerServices.CallerLineNumberAttribute"/>). 
         /// 
         /// See https://msdn.microsoft.com/en-us/library/hh534540.aspx
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(false)]
         public bool IncludeCallerInformation { get; set; }
 
@@ -96,6 +110,20 @@ namespace NLog.LayoutRenderers
                     throw new ArgumentException("Invalid format: [value] placeholder is missing.");
 
                 _format = value;
+
+                var formatSplit = _format.Split(new[] { "[key]", "[value]" }, StringSplitOptions.None);
+                if (formatSplit.Length == 3)
+                {
+                    _beforeKey = formatSplit[0];
+                    _afterKey = formatSplit[1];
+                    _afterValue = formatSplit[2];
+                }
+                else
+                {
+                    _beforeKey = null;
+                    _afterKey = null;
+                    _afterValue = null;
+                }
             }
         }
 
@@ -108,8 +136,15 @@ namespace NLog.LayoutRenderers
         {
             if (logEvent.HasProperties)
             {
+                var formatProvider = GetFormatProvider(logEvent);
+
                 bool first = true;
-                foreach (var property in GetProperties(logEvent))
+                IEnumerable<KeyValuePair<object, object>> properties = GetProperties(logEvent);
+                if (!IncludeEmptyValues)
+                {
+                    properties = properties.Where(p => !IsEmptyPropertyValue(p.Value));
+                }
+                foreach (var property in properties)
                 {
                     if (!first)
                     {
@@ -118,16 +153,34 @@ namespace NLog.LayoutRenderers
 
                     first = false;
 
-                    var formatProvider = GetFormatProvider(logEvent);
-
-                    var key = Convert.ToString(property.Key, formatProvider);
-                    var value = Convert.ToString(property.Value, formatProvider);
-                    var pair = Format.Replace("[key]", key)
-                                     .Replace("[value]", value);
-
-                    builder.Append(pair);
+                    if (_beforeKey == null || _afterKey == null || _afterValue == null)
+                    {
+                        var key = Convert.ToString(property.Key, formatProvider);
+                        var value = Convert.ToString(property.Value, formatProvider);
+                        var pair = Format.Replace("[key]", key)
+                                         .Replace("[value]", value);
+                        builder.Append(pair);
+                    }
+                    else
+                    {
+                        builder.Append(_beforeKey);
+                        builder.AppendFormattedValue(property.Key, null, formatProvider);
+                        builder.Append(_afterKey);
+                        builder.AppendFormattedValue(property.Value, null, formatProvider);
+                        builder.Append(_afterValue);
+                    }
                 }
             }
+        }
+
+        private static bool IsEmptyPropertyValue(object value)
+        {
+            if (value is string s)
+            {
+                return string.IsNullOrEmpty(s);
+            }
+
+            return value == null;
         }
 
 #if NET4_5
@@ -135,8 +188,9 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// The names of caller information attributes.
         /// https://msdn.microsoft.com/en-us/library/hh534540.aspx
+        /// TODO NLog ver. 5 - Remove these properties
         /// </summary>
-        private static HashSet<string> CallerInformationAttributeNames = new HashSet<string>
+        private static List<string> CallerInformationAttributeNames = new List<string>
         {
             {"CallerMemberName"},
             {"CallerFilePath"},
@@ -144,26 +198,37 @@ namespace NLog.LayoutRenderers
         };
 
         /// <summary>
-        /// Also render the call attributes? (<see cref="CallerMemberNameAttribute"/>,
-        /// <see cref="CallerFilePathAttribute"/>, <see cref="CallerLineNumberAttribute"/>). 
+        /// Also render the call attributes? (<see cref="System.Runtime.CompilerServices.CallerMemberNameAttribute"/>,
+        /// <see cref="System.Runtime.CompilerServices.CallerFilePathAttribute"/>, <see cref="System.Runtime.CompilerServices.CallerLineNumberAttribute"/>). 
         /// </summary>
         ///
 #endif
 
         private IDictionary<object, object> GetProperties(LogEventInfo logEvent)
         {
+            var properties = logEvent.Properties;
 #if NET4_5
 
             if (IncludeCallerInformation)
             {
-                return logEvent.Properties;
+                return properties;
             }
-            
-            //filter CallerInformationAttributeNames
-            return logEvent.Properties.Where(p => !CallerInformationAttributeNames.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value);
 
+            if (logEvent.CallSiteInformation != null)
+            {
+                // TODO NLog ver. 5 - Remove these properties. Instead output artificial properties, extracted from LogEventInfo.CallSiteInformation
+                foreach (string propertyName in CallerInformationAttributeNames)
+                {
+                    if (properties.ContainsKey(propertyName))
+                    {
+                        return properties.Where(p => !CallerInformationAttributeNames.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value);
+                    }
+                }
+            }
+
+            return properties;
 #else
-            return logEvent.Properties;
+            return properties;
 #endif
         }
     }

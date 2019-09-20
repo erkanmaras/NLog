@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,14 +31,16 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.IO;
-using NLog.Common;
+#if !NETSTANDARD1_3
 
 namespace NLog.Targets
 {
     using System;
+    using System.IO;
     using System.Text;
     using System.ComponentModel;
+
+    using NLog.Common;
 
     /// <summary>
     /// Writes log messages to the console.
@@ -67,12 +69,12 @@ namespace NLog.Targets
         /// </summary>
         /// <remarks>
         ///   Console.Out.Writeline / Console.Error.Writeline could throw 'IndexOutOfRangeException', which is a bug. 
-        /// See http://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
+        /// See https://stackoverflow.com/questions/33915790/console-out-and-console-error-race-condition-error-in-a-windows-service-written
         /// and https://connect.microsoft.com/VisualStudio/feedback/details/2057284/console-out-probable-i-o-race-condition-issue-in-multi-threaded-windows-service
         ///             
         /// Full error: 
         ///   Error during session close: System.IndexOutOfRangeException: Probable I/ O race condition detected while copying memory.
-        ///   The I/ O package is not thread safe by default.In multithreaded applications, 
+        ///   The I/ O package is not thread safe by default. In multi threaded applications, 
         ///   a stream must be accessed in a thread-safe way, such as a thread - safe wrapper returned by TextReader's or 
         ///   TextWriter's Synchronized methods.This also applies to classes like StreamWriter and StreamReader.
         /// 
@@ -91,6 +93,7 @@ namespace NLog.Targets
         /// The encoding for writing messages to the <see cref="Console"/>.
         ///  </summary>
         /// <remarks>Has side effect</remarks>
+        /// <docgen category='Console Options' order='10' />
         public Encoding Encoding
         {
             get => ConsoleTargetHelper.GetConsoleOutputEncoding(_encoding, IsInitialized, _pauseLogging);
@@ -108,8 +111,18 @@ namespace NLog.Targets
         ///  - Disables console writing if Environment.UserInteractive = False (Windows Service)
         ///  - Disables console writing if Console Standard Input is not available (Non-Console-App)
         /// </summary>
+        /// <docgen category='Console Options' order='10' />
         [DefaultValue(false)]
         public bool DetectConsoleAvailable { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to auto-flush after <see cref="Console.WriteLine()"/>
+        /// </summary>
+        /// <remarks>
+        /// Normally not required as standard Console.Out will have <see cref="StreamWriter.AutoFlush"/> = true, but not when pipe to file
+        /// </remarks>
+        [DefaultValue(false)]
+        public bool AutoFlush { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ConsoleTarget" /> class.
@@ -152,10 +165,12 @@ namespace NLog.Targets
                     InternalLogger.Info("Console has been detected as turned off. Disable DetectConsoleAvailable to skip detection. Reason: {0}", reason);
                 }
             }
+
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__
-            if (_encoding != null && !_pauseLogging)
-                Console.OutputEncoding = _encoding;
+            if (_encoding != null)
+                ConsoleTargetHelper.SetConsoleOutputEncoding(_encoding, true, _pauseLogging);
 #endif
+
             base.InitializeTarget();
             if (Header != null)
             {
@@ -172,8 +187,31 @@ namespace NLog.Targets
             {
                 WriteToOutput(RenderLogEvent(Footer, LogEventInfo.CreateNullEvent()));
             }
-
+            ExplicitConsoleFlush();
             base.CloseTarget();
+        }
+
+        /// <inheritdoc />
+        protected override void FlushAsync(AsyncContinuation asyncContinuation)
+        {
+            try
+            {
+                ExplicitConsoleFlush();
+                base.FlushAsync(asyncContinuation);
+            }
+            catch (Exception ex)
+            {
+                asyncContinuation(ex);
+            }
+        }
+
+        private void ExplicitConsoleFlush()
+        {
+            if (!_pauseLogging && !AutoFlush)
+            {
+                var output = GetOutput();
+                output.Flush();
+            }
         }
 
         /// <summary>
@@ -211,6 +249,8 @@ namespace NLog.Targets
             try
             {
                 output.WriteLine(textLine);
+                if (AutoFlush)
+                    output.Flush();
             }
             catch (IndexOutOfRangeException ex)
             {
@@ -234,3 +274,5 @@ namespace NLog.Targets
         }
     }
 }
+
+#endif

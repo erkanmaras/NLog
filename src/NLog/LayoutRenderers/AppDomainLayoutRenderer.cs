@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,7 +35,6 @@
 
 using System;
 using System.ComponentModel;
-using System.Linq;
 using System.Text;
 using NLog.Config;
 using NLog.Internal.Fakeables;
@@ -45,7 +44,10 @@ namespace NLog.LayoutRenderers
     /// <summary>
     ///  Used to render the application domain name.
     ///  </summary>
-    [ThreadAgnostic, LayoutRenderer("appdomain")]
+    [LayoutRenderer("appdomain")]
+    [AppDomainFixedOutput]
+    [ThreadAgnostic]
+    [ThreadSafe]
     public class AppDomainLayoutRenderer : LayoutRenderer
     {
         private const string ShortFormat = "{0:00}";
@@ -77,26 +79,38 @@ namespace NLog.LayoutRenderers
         /// The first parameter is the  <see cref="IAppDomain.Id"/>, the second the second the  <see cref="IAppDomain.FriendlyName"/>
         /// This string is used in <see cref="string.Format(string,object[])"/>
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultParameter]
         [DefaultValue(LongFormatCode)]
         public string Format { get; set; }
 
-        /// <summary>
-        /// Render the layout
-        /// </summary>
-        /// <param name="builder"></param>
-        /// <param name="logEvent"></param>
-        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        /// <inheritdoc/>
+        protected override void InitializeLayoutRenderer()
         {
-            var formattingString = GetFormattingString(Format);
-            builder.Append(string.Format(formattingString, _currentDomain.Id, _currentDomain.FriendlyName));
+            _assemblyName = null;
+            base.InitializeLayoutRenderer();
         }
 
-        /// <summary>
-        /// Convert the formatting string
-        /// </summary>
-        /// <param name="format"></param>
-        /// <returns></returns>
+        /// <inheritdoc/>
+        protected override void CloseLayoutRenderer()
+        {
+            _assemblyName = null;
+            base.CloseLayoutRenderer();
+        }
+
+        private string _assemblyName;
+
+        /// <inheritdoc/>
+        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            if (_assemblyName == null)
+            {
+                var formattingString = GetFormattingString(Format);
+                _assemblyName = string.Format(formattingString, _currentDomain.Id, _currentDomain.FriendlyName);
+            }
+            builder.Append(_assemblyName);
+        }
+
         private static string GetFormattingString(string format)
         {
             string formattingString;
@@ -110,7 +124,7 @@ namespace NLog.LayoutRenderers
             }
             else
             {
-                //custom value;
+                //custom format string
                 formattingString = format;
             }
             return formattingString;

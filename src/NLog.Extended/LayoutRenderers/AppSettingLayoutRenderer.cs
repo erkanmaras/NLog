@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -61,6 +61,11 @@ namespace NLog.LayoutRenderers
 		[DefaultParameter]
 		public string Name { get; set; }
 
+        /// <summary>
+        /// The AppSetting name (Easier documentation and improves consistency)
+        /// </summary>
+        public string Item { get => Name; set => Name = value; }
+
 		///<summary>
 		/// The default value to render if the AppSetting value is null.
 		///</summary>
@@ -90,8 +95,8 @@ namespace NLog.LayoutRenderers
 				builder.Append(value);
 		}
 
-		private bool _cachedAppSettingValue = false;
-		private string _appSettingValue = null;
+		private bool _cachedAppSettingValue;
+		private string _appSettingValue;
 		
 		private string AppSettingValue
 		{

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Config;
+
 namespace NLog.UnitTests.LayoutRenderers
 {
     using Xunit;
@@ -40,7 +42,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void MDCTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${mdc:item=myitem} ${message}' /></targets>
                 <rules>
@@ -60,6 +62,23 @@ namespace NLog.UnitTests.LayoutRenderers
             MappedDiagnosticsContext.Remove("myitem");
             LogManager.GetLogger("A").Debug("c");
             AssertDebugLastMessage("debug", " c");
+        }
+
+        [Fact]
+        public void MDCFormatTest()
+        {
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${mdc:item=myitem:format=@} ${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            MappedDiagnosticsContext.Clear();
+            MappedDiagnosticsContext.Set("myitem", new { RequestId = 123 });
+            LogManager.GetLogger("A").Debug("a");
+            AssertDebugLastMessage("debug", "{\"RequestId\":123} a");
         }
     }
 }

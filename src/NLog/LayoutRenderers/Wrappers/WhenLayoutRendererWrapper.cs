@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,13 +31,14 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using NLog.Layouts;
-
 namespace NLog.LayoutRenderers.Wrappers
 {
+    using System;
     using System.Text;
-    using Conditions;
-    using Config;
+    using NLog.Conditions;
+    using NLog.Config;
+    using NLog.Layouts;
+    using NLog.Internal;
 
     /// <summary>
     /// Only outputs the inner layout when the specified condition has been met.
@@ -45,45 +46,75 @@ namespace NLog.LayoutRenderers.Wrappers
     [LayoutRenderer("when")]
     [AmbientProperty("When")]
     [ThreadAgnostic]
-    public sealed class WhenLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
+    [ThreadSafe]
+    public sealed class WhenLayoutRendererWrapper : WrapperLayoutRendererBuilderBase, IRawValue
     {
         /// <summary>
         /// Gets or sets the condition that must be met for the <see cref="WrapperLayoutRendererBase.Inner"/> layout to be printed.
         /// </summary>
         /// <docgen category="Transformation Options" order="10"/>
         [RequiredParameter]
-
         public ConditionExpression When { get; set; }
-
 
         /// <summary>
         /// If <see cref="When"/> is not met, print this layout.
         /// </summary>
+        /// <docgen category="Transformation Options" order="10"/>
         public Layout Else { get; set; }
 
-        /// <summary>
-        /// Transforms the output of another layout.
-        /// </summary>
-        /// <param name="target">Output to be transform.</param>
+        /// <inheritdoc/>
+        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        {
+            int orgLength = builder.Length;
+            try
+            {
+                if (ShouldRenderInner(logEvent))
+                {
+                    Inner?.RenderAppendBuilder(logEvent, builder);
+                }
+                else
+                {
+                    Else?.RenderAppendBuilder(logEvent, builder);
+                }
+            }
+            catch
+            {
+                builder.Length = orgLength; // Rewind/Truncate on exception
+                throw;
+            }
+        }
+
+        private bool ShouldRenderInner(LogEventInfo logEvent)
+        {
+            return When == null || true.Equals(When.Evaluate(logEvent));
+        }
+
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
         protected override void TransformFormattedMesssage(StringBuilder target)
         {
         }
 
-        /// <summary>
-        /// Renders the inner layout contents.
-        /// </summary>
-        /// <param name="logEvent">The log event.</param>
-        /// <param name="target"><see cref="StringBuilder"/> for the result</param>
-        protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
+        /// <inheritdoc />
+        public bool TryGetRawValue(LogEventInfo logEvent, out object value)
         {
-            if (When == null || true.Equals(When.Evaluate(logEvent)))
+            if (ShouldRenderInner(logEvent))
             {
-                base.RenderFormattedMessage(logEvent, target);
+                return TryGetRawValueFromLayout(logEvent, Inner, out value);
             }
-            else if (Else != null)
+
+            return TryGetRawValueFromLayout(logEvent, Else, out value);
+        }
+
+        private static bool TryGetRawValueFromLayout(LogEventInfo logEvent, Layout layout, out object value)
+        {
+            if (layout == null)
             {
-                Else.RenderAppendBuilder(logEvent, target);
+                value = null;
+                return false;
             }
+
+            return layout.TryGetRawValue(logEvent, out value);
         }
     }
 }

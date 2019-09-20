@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -32,8 +32,8 @@
 // 
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
+using JetBrains.Annotations;
 
 namespace NLog.Internal
 {
@@ -47,9 +47,9 @@ namespace NLog.Internal
         /// </summary>
         /// <param name="value"></param>
         /// <returns></returns>
+        [ContractAnnotation("value:null => true")]
         internal static bool IsNullOrWhiteSpace(string value)
         {
-
 #if NET3_5
 
             if (value == null) return true;
@@ -58,6 +58,26 @@ namespace NLog.Internal
 #else
             return string.IsNullOrWhiteSpace(value);
 #endif
+        }
+
+        internal static string[] SplitAndTrimTokens(this string value, char delimiter)
+        {
+            if (IsNullOrWhiteSpace(value))
+                return ArrayHelper.Empty<string>();
+
+            if (value.IndexOf(delimiter) == -1)
+            {
+                return new[] { value.Trim() };
+            }
+
+            var result = value.Split(new char[] { delimiter }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < result.Length; ++i)
+            {
+                result[i] = result[i].Trim();
+                if (string.IsNullOrEmpty(result[i]))
+                    return result.Where(s => !IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToArray();
+            }
+            return result;
         }
     }
 }

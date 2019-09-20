@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -39,6 +39,7 @@ namespace NLog.UnitTests.Targets
     using System.Linq;
     using System.Net;
     using System.Net.Sockets;
+    using System.Security.Authentication;
     using System.Text;
     using System.Threading;
     using NLog.Common;
@@ -615,17 +616,14 @@ namespace NLog.UnitTests.Targets
                     {
                         try
                         {
-                            // Console.WriteLine("Accepting...");
                             byte[] buffer = new byte[4096];
                             using (Socket connectedSocket = listener.EndAccept(result))
                             {
-                                // Console.WriteLine("Accepted...");
                                 int got;
                                 while ((got = connectedSocket.Receive(buffer, 0, buffer.Length, SocketFlags.None)) > 0)
                                 {
                                     resultStream.Write(buffer, 0, got);
                                 }
-                                // Console.WriteLine("Closing connection...");
                             }
                         }
                         catch (Exception ex)
@@ -886,13 +884,59 @@ namespace NLog.UnitTests.Targets
             Assert.True(result.IndexOf("5: close") != -1);
         }
 
+        [Theory]
+        [InlineData("none", SslProtocols.None)] //we can't set it on ""
+        [InlineData("tls", SslProtocols.Tls)]
+        [InlineData("tls11", SslProtocols.Tls11)]
+        [InlineData("tls,tls11", SslProtocols.Tls11 | SslProtocols.Tls)]
+        public void SslProtocolsConfigTest(string sslOptions, SslProtocols expected)
+        {
+            var config = XmlLoggingConfiguration.CreateFromXmlString($@"
+            <nlog>
+                <targets><target name='target1' type='network' layout='${{message}}' Address='tcp://127.0.0.1:50001' sslProtocols='{sslOptions}' /></targets>
+               
+            </nlog>");
+
+            var target = config.FindTargetByName<NetworkTarget>("target1");
+            Assert.Equal(expected, target.SslProtocols);
+        }
+
+        [Theory]
+        [InlineData("0", 0)]
+        [InlineData("30", 30)]
+        public void KeepAliveTimeConfigTest(string keepAliveTimeSeconds, int expected)
+        {
+            if (IsTravis())
+            {
+                Console.WriteLine("[SKIP] NetworkTargetTests.KeepAliveTimeConfigTest because we are running in Travis");
+                return;
+            }
+
+            var config = XmlLoggingConfiguration.CreateFromXmlString($@"
+            <nlog>
+                <targets><target name='target1' type='network' layout='${{message}}' Address='tcp://127.0.0.1:50001' keepAliveTimeSeconds='{keepAliveTimeSeconds}' /></targets>
+                <rules><logger name='*' minLevel='Trace' writeTo='target1'/></rules>
+            </nlog>");
+
+            var target = config.FindTargetByName<NetworkTarget>("target1");
+            Assert.Equal(expected, target.KeepAliveTimeSeconds);
+
+            LogManager.Configuration = config;
+            var logger = LogManager.GetLogger("keepAliveTimeSeconds");
+
+            using (new NoThrowNLogExceptions())
+            {
+                logger.Info("Hello");
+            }
+        }
+
         internal class MySenderFactory : INetworkSenderFactory
         {
             internal List<MyNetworkSender> Senders = new List<MyNetworkSender>();
             internal StringWriter Log = new StringWriter();
             private int idCounter;
 
-            public NetworkSender Create(string url, int maximumQueueSize)
+            public NetworkSender Create(string url, int maxQueueSize, SslProtocols sslProtocols, TimeSpan keepAliveTime)
             {
                 var sender = new MyNetworkSender(url, ++idCounter, Log, this);
                 Senders.Add(sender);

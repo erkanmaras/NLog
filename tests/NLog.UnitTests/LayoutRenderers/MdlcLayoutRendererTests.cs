@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -59,6 +59,24 @@ namespace NLog.UnitTests.LayoutRenderers
 
             _target = LogManager.Configuration.FindTargetByName("debug") as DebugTarget;
 
+            MappedDiagnosticsLogicalContext.Clear();
+        }
+
+        [Fact]
+        public void MdlcLayoutFormatTest()
+        {
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${mdlc:item=myitem:format=@} ${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            MappedDiagnosticsLogicalContext.Clear();
+            MappedDiagnosticsLogicalContext.Set("myitem", new { RequestId = 123 });
+            LogManager.GetLogger("A").Debug("a");
+            AssertDebugLastMessage("debug", "{\"RequestId\":123} a");
             MappedDiagnosticsLogicalContext.Clear();
         }
 

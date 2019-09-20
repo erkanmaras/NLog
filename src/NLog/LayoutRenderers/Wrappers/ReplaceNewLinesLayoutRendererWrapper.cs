@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,17 +33,20 @@
 
 namespace NLog.LayoutRenderers.Wrappers
 {
-    using Config;
     using System;
     using System.ComponentModel;
-
+    using System.Text;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Replaces newline characters from the result of another layout renderer with spaces.
     /// </summary>
     [LayoutRenderer("replace-newlines")]
     [AmbientProperty("ReplaceNewLines")]
+    [AppDomainFixedOutput]
     [ThreadAgnostic]
+    [ThreadSafe]
     public sealed class ReplaceNewLinesLayoutRendererWrapper : WrapperLayoutRendererBuilderBase
     {
         /// <summary>
@@ -57,17 +60,38 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <summary>
         /// Gets or sets a value indicating the string that should be used for separating lines.
         /// </summary>
+        /// <docgen category='Transformation Options' order='10' />
         [DefaultValue(" ")]
         public string Replacement { get; set; }
 
-
-        /// <summary>
-        /// Post-processes the rendered message. 
-        /// </summary>
-        /// <param name="target">Output to be post-processed.</param>
-        protected override void TransformFormattedMesssage(System.Text.StringBuilder target)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
-            target.Replace(Environment.NewLine, Replacement);
+            Inner.RenderAppendBuilder(logEvent, builder);
+            if (builder.Length > orgLength)
+            {
+                string newLine = Environment.NewLine;
+                if (!string.IsNullOrEmpty(newLine) && builder.IndexOf(newLine[newLine.Length - 1], orgLength) >= 0)
+                {
+                    string str = builder.ToString(orgLength, builder.Length - orgLength);
+                    str = str.Replace(newLine, Replacement);
+                    if (newLine != "\n" && !HasUnixNewline(Replacement) && HasUnixNewline(str))
+                        str = str.Replace("\n", Replacement);   // Recognize Unix-Newline on Windows-platform
+                    builder.Length = orgLength;
+                    builder.Append(str);
+                }
+            }
+        }
+
+        private static bool HasUnixNewline(string str)
+        {
+            return str != null && str.IndexOf('\n') >= 0;
+        }
+
+        /// <inheritdoc/>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
+        protected override void TransformFormattedMesssage(StringBuilder target)
+        {
         }
     }
 }

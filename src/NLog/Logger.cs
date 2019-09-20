@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,15 +34,13 @@
 namespace NLog
 {
     using System;
+    using System.Collections.Generic;
     using System.ComponentModel;
-
-    using JetBrains.Annotations;
-
-    using Internal;
-
 #if NET4_5
     using System.Threading.Tasks;
 #endif
+    using JetBrains.Annotations;
+    using NLog.Internal;
 
     /// <summary>
     /// Provides logging interface and utility functions.
@@ -50,9 +48,10 @@ namespace NLog
     [CLSCompliant(true)]
     public partial class Logger : ILogger
     {
-        private readonly Type _loggerType = typeof(Logger);
-
-        private volatile LoggerConfiguration _configuration;
+        internal static readonly Type DefaultLoggerType = typeof(Logger);
+        private Logger _contextLogger;
+        private ThreadSafeDictionary<string, object> _contextProperties;
+        private LoggerConfiguration _configuration;
         private volatile bool _isTraceEnabled;
         private volatile bool _isDebugEnabled;
         private volatile bool _isInfoEnabled;
@@ -65,6 +64,7 @@ namespace NLog
         /// </summary>
         protected internal Logger()
         {
+            _contextLogger = this;
         }
 
         /// <summary>
@@ -83,6 +83,15 @@ namespace NLog
         public LogFactory Factory { get; private set; }
 
         /// <summary>
+        /// Collection of context properties for the Logger. The logger will append it for all log events
+        /// </summary>
+        /// <remarks>
+        /// It is recommended to use <see cref="WithProperty(string, object)"/> for modifying context properties
+        /// when same named logger is used at multiple locations or shared by different thread contexts.
+        /// </remarks>
+        public IDictionary<string, object> Properties => _contextProperties ?? System.Threading.Interlocked.CompareExchange(ref _contextProperties, CreateContextPropertiesDictionary(null), null) ?? _contextProperties;
+
+        /// <summary>
         /// Gets a value indicating whether logging is enabled for the specified level.
         /// </summary>
         /// <param name="level">Log level to be checked.</param>
@@ -98,14 +107,68 @@ namespace NLog
         }
 
         /// <summary>
+        /// Creates new logger that automatically appends the specified property to all log events (without changing current logger)
+        /// </summary>
+        /// <param name="propertyKey">Property Name</param>
+        /// <param name="propertyValue">Property Value</param>
+        /// <returns>New Logger object that automatically appends specified property</returns>
+        public Logger WithProperty(string propertyKey, object propertyValue)
+        {
+            if (string.IsNullOrEmpty(propertyKey))
+                throw new ArgumentException(nameof(propertyKey));
+
+            Logger newLogger = Factory.CreateNewLogger(GetType()) ?? new Logger();
+            newLogger.Initialize(Name, _configuration, Factory);
+            newLogger._contextProperties = CreateContextPropertiesDictionary(_contextProperties);
+            newLogger._contextProperties[propertyKey] = propertyValue;
+            newLogger._contextLogger = _contextLogger;  // Use the LoggerConfiguration of the parent Logger
+            return newLogger;
+        }
+
+        /// <summary>
+        /// Updates the specified context property for the current logger. The logger will append it for all log events.
+        ///
+        /// It could be rendered with ${event-properties:YOURNAME}
+        ///
+        /// With <see cref="Properties"/> property, all properties could be changed. 
+        /// </summary>
+        /// <remarks>
+        /// Will affect all locations/contexts that makes use of the same named logger object.
+        /// </remarks>
+        /// <param name="propertyKey">Property Name</param>
+        /// <param name="propertyValue">Property Value</param>
+        /// <remarks>
+        /// It is recommended to use <see cref="WithProperty(string, object)"/> for modifying context properties
+        /// when same named logger is used at multiple locations or shared by different thread contexts.
+        /// </remarks>
+        public void SetProperty(string propertyKey, object propertyValue)
+        {
+            if (string.IsNullOrEmpty(propertyKey))
+                throw new ArgumentException(nameof(propertyKey));
+
+            Properties[propertyKey] = propertyValue;
+        }
+
+        private static ThreadSafeDictionary<string, object> CreateContextPropertiesDictionary(ThreadSafeDictionary<string, object> contextProperties)
+        {
+            contextProperties = contextProperties != null
+                ? new ThreadSafeDictionary<string, object>(contextProperties)
+                : new ThreadSafeDictionary<string, object>();
+            return contextProperties;
+        }
+
+        /// <summary>
         /// Writes the specified diagnostic message.
         /// </summary>
         /// <param name="logEvent">Log event.</param>
         public void Log(LogEventInfo logEvent)
         {
-            if (IsEnabled(logEvent.Level))
+            var targetsForLevel = IsEnabled(logEvent.Level) ? GetTargetsForLevel(logEvent.Level) : null;
+            if (targetsForLevel != null)
             {
-                WriteToTargets(logEvent);
+                if (logEvent.LoggerName == null)
+                    logEvent.LoggerName = Name;
+                WriteToTargets(logEvent, targetsForLevel);
             }
         }
 
@@ -116,9 +179,12 @@ namespace NLog
         /// <param name="logEvent">Log event.</param>
         public void Log(Type wrapperType, LogEventInfo logEvent)
         {
-            if (IsEnabled(logEvent.Level))
+            var targetsForLevel = IsEnabled(logEvent.Level) ? GetTargetsForLevel(logEvent.Level) : null;
+            if (targetsForLevel != null)
             {
-                WriteToTargets(wrapperType, logEvent);
+                if (logEvent.LoggerName == null)
+                    logEvent.LoggerName = Name;
+                WriteToTargets(wrapperType, logEvent, targetsForLevel);
             }
         }
 
@@ -167,7 +233,7 @@ namespace NLog
             {
                 if (messageFunc == null)
                 {
-                    throw new ArgumentNullException("messageFunc");
+                    throw new ArgumentNullException(nameof(messageFunc));
                 }
 
                 WriteToTargets(level, null, messageFunc());
@@ -194,12 +260,12 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Log(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
-        { 
+        {
             if (IsEnabled(level))
             {
-                WriteToTargets(level, formatProvider, message, args); 
+                WriteToTargets(level, formatProvider, message, args);
             }
         }
 
@@ -208,8 +274,8 @@ namespace NLog
         /// </summary>
         /// <param name="level">The log level.</param>
         /// <param name="message">Log message.</param>
-        public void Log(LogLevel level, [Localizable(false)] string message) 
-        { 
+        public void Log(LogLevel level, [Localizable(false)] string message)
+        {
             if (IsEnabled(level))
             {
                 WriteToTargets(level, null, message);
@@ -222,8 +288,9 @@ namespace NLog
         /// <param name="level">The log level.</param>
         /// <param name="message">A <see langword="string" /> containing format items.</param>
         /// <param name="args">Arguments to format.</param>
-        public void Log(LogLevel level, [Localizable(false)] string message, params object[] args) 
-        { 
+        [MessageTemplateFormatMethod("message")]
+        public void Log(LogLevel level, [Localizable(false)] string message, params object[] args)
+        {
             if (IsEnabled(level))
             {
                 WriteToTargets(level, message, args);
@@ -242,7 +309,7 @@ namespace NLog
         {
             if (IsEnabled(level))
             {
-                WriteToTargets(level, message, exception);
+                WriteToTargets(level, exception, message, null);
             }
         }
 
@@ -253,6 +320,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="args">Arguments to format.</param>
         /// <param name="exception">An exception to be logged.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Log(LogLevel level, Exception exception, [Localizable(false)] string message, params object[] args)
         {
             if (IsEnabled(level))
@@ -269,6 +337,7 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="args">Arguments to format.</param>
         /// <param name="exception">An exception to be logged.</param>
+        [MessageTemplateFormatMethod("message")]
         public void Log(LogLevel level, Exception exception, IFormatProvider formatProvider, [Localizable(false)] string message, params object[] args)
         {
             if (IsEnabled(level))
@@ -285,12 +354,12 @@ namespace NLog
         /// <param name="formatProvider">An IFormatProvider that supplies culture-specific formatting information.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Log<TArgument>(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, TArgument argument)
-        { 
+        {
             if (IsEnabled(level))
             {
-                WriteToTargets(level, formatProvider, message, new object[] { argument }); 
+                WriteToTargets(level, formatProvider, message, new object[] { argument });
             }
         }
 
@@ -301,7 +370,7 @@ namespace NLog
         /// <param name="level">The log level.</param>
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument">The argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Log<TArgument>(LogLevel level, [Localizable(false)] string message, TArgument argument)
         {
             if (IsEnabled(level))
@@ -320,11 +389,12 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        public void Log<TArgument1, TArgument2>(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2) 
-        { 
+        [MessageTemplateFormatMethod("message")]
+        public void Log<TArgument1, TArgument2>(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
+        {
             if (IsEnabled(level))
             {
-                WriteToTargets(level, formatProvider, message, new object[] { argument1, argument2 }); 
+                WriteToTargets(level, formatProvider, message, new object[] { argument1, argument2 });
             }
         }
 
@@ -337,9 +407,9 @@ namespace NLog
         /// <param name="message">A <see langword="string" /> containing one format item.</param>
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Log<TArgument1, TArgument2>(LogLevel level, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2)
-        { 
+        {
             if (IsEnabled(level))
             {
                 WriteToTargets(level, message, new object[] { argument1, argument2 });
@@ -358,11 +428,12 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        public void Log<TArgument1, TArgument2, TArgument3>(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3) 
-        { 
+        [MessageTemplateFormatMethod("message")]
+        public void Log<TArgument1, TArgument2, TArgument3>(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
+        {
             if (IsEnabled(level))
             {
-                WriteToTargets(level, formatProvider, message, new object[] { argument1, argument2, argument3 }); 
+                WriteToTargets(level, formatProvider, message, new object[] { argument1, argument2, argument3 });
             }
         }
 
@@ -377,25 +448,14 @@ namespace NLog
         /// <param name="argument1">The first argument to format.</param>
         /// <param name="argument2">The second argument to format.</param>
         /// <param name="argument3">The third argument to format.</param>
-        [StringFormatMethod("message")]
+        [MessageTemplateFormatMethod("message")]
         public void Log<TArgument1, TArgument2, TArgument3>(LogLevel level, [Localizable(false)] string message, TArgument1 argument1, TArgument2 argument2, TArgument3 argument3)
-        { 
+        {
             if (IsEnabled(level))
             {
                 WriteToTargets(level, message, new object[] { argument1, argument2, argument3 });
             }
         }
-
-        internal void WriteToTargets(LogLevel level, Exception ex, [Localizable(false)] string message, object[] args)
-        {
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), PrepareLogEventInfo(LogEventInfo.Create(level, Name, ex, Factory.DefaultCultureInfo, message, args)), Factory);
-        }
-
-        internal void WriteToTargets(LogLevel level, Exception ex, IFormatProvider formatProvider, [Localizable(false)] string message, object[] args)
-        {
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), PrepareLogEventInfo(LogEventInfo.Create(level, Name, ex, formatProvider, message, args)), Factory);
-        }
-
 
         private LogEventInfo PrepareLogEventInfo(LogEventInfo logEvent)
         {
@@ -403,8 +463,17 @@ namespace NLog
             {
                 logEvent.FormatProvider = Factory.DefaultCultureInfo;
             }
+            if (_contextProperties != null)
+            {
+                foreach (var property in _contextProperties)
+                {
+                    if (!logEvent.Properties.ContainsKey(property.Key))
+                    {
+                        logEvent.Properties[property.Key] = property.Value;
+                    }
+                }
+            }
             return logEvent;
-
         }
 
         #endregion
@@ -551,51 +620,71 @@ namespace NLog
             SetConfiguration(loggerConfiguration);
         }
 
-        internal void WriteToTargets(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, object[] args)
-        {
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), PrepareLogEventInfo(LogEventInfo.Create(level, Name, formatProvider, message, args)), Factory);
-        }
-
-        internal void WriteToTargets(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message)
-        {
-            // please note that this overload calls the overload of LogEventInfo.Create with object[] parameter on purpose -
-            // to avoid unnecessary string.Format (in case of calling Create(LogLevel, string, IFormatProvider, object))
-            var logEvent = LogEventInfo.Create(level, Name, formatProvider, message, (object[])null);
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), PrepareLogEventInfo(logEvent), Factory);
-        }
-
-        internal void WriteToTargets<T>(LogLevel level, IFormatProvider formatProvider, T value)
-        {
-            var logEvent = PrepareLogEventInfo(LogEventInfo.Create(level, Name, formatProvider, value));
-            var ex = value as Exception;
-            if (ex != null)
-            {
-                //also record exception
-                logEvent.Exception = ex;
-             
-            }
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), logEvent, Factory);
-        }
-
-        [Obsolete("Use WriteToTargets(Exception ex, LogLevel level, IFormatProvider formatProvider, string message, object[] args) method instead. Marked obsolete before v4.3.11")]
-        internal void WriteToTargets(LogLevel level, [Localizable(false)] string message, Exception ex)
-        {
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(level), PrepareLogEventInfo(LogEventInfo.Create(level, Name, message, ex)), Factory);
-        }
-
-        internal void WriteToTargets(LogLevel level, [Localizable(false)] string message, object[] args)
+        private void WriteToTargets(LogLevel level, [Localizable(false)] string message, object[] args)
         {
             WriteToTargets(level, Factory.DefaultCultureInfo, message, args);
         }
 
-        internal void WriteToTargets(LogEventInfo logEvent)
+        private void WriteToTargets(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message, object[] args)
         {
-            LoggerImpl.Write(_loggerType, GetTargetsForLevel(logEvent.Level), PrepareLogEventInfo(logEvent), Factory);
+            var targetsForLevel = GetTargetsForLevel(level);
+            if (targetsForLevel != null)
+            {
+                var logEvent = LogEventInfo.Create(level, Name, formatProvider, message, args);
+                WriteToTargets(logEvent, targetsForLevel);
+            }
         }
 
-        internal void WriteToTargets(Type wrapperType, LogEventInfo logEvent)
+        private void WriteToTargets(LogLevel level, IFormatProvider formatProvider, [Localizable(false)] string message)
         {
-            LoggerImpl.Write(wrapperType ?? _loggerType, GetTargetsForLevel(logEvent.Level), PrepareLogEventInfo(logEvent), Factory);
+            var targetsForLevel = GetTargetsForLevel(level);
+            if (targetsForLevel != null)
+            {
+                // please note that this overload calls the overload of LogEventInfo.Create with object[] parameter on purpose -
+                // to avoid unnecessary string.Format (in case of calling Create(LogLevel, string, IFormatProvider, object))
+                var logEvent = LogEventInfo.Create(level, Name, formatProvider, message, (object[])null);
+                WriteToTargets(logEvent, targetsForLevel);
+            }
+        }
+
+        private void WriteToTargets<T>(LogLevel level, IFormatProvider formatProvider, T value)
+        {
+            var targetsForLevel = GetTargetsForLevel(level);
+            if (targetsForLevel != null)
+            {
+                var logEvent = LogEventInfo.Create(level, Name, formatProvider, value);
+                WriteToTargets(logEvent, targetsForLevel);
+            }
+        }
+
+        private void WriteToTargets(LogLevel level, Exception ex, [Localizable(false)] string message, object[] args)
+        {
+            var targetsForLevel = GetTargetsForLevel(level);
+            if (targetsForLevel != null)
+            {
+                var logEvent = LogEventInfo.Create(level, Name, ex, Factory.DefaultCultureInfo, message, args);
+                WriteToTargets(logEvent, targetsForLevel);
+            }
+        }
+
+        private void WriteToTargets(LogLevel level, Exception ex, IFormatProvider formatProvider, [Localizable(false)] string message, object[] args)
+        {
+            var targetsForLevel = GetTargetsForLevel(level);
+            if (targetsForLevel != null)
+            {
+                var logEvent = LogEventInfo.Create(level, Name, ex, formatProvider, message, args);
+                WriteToTargets(logEvent, targetsForLevel);
+            }
+        }
+
+        private void WriteToTargets([NotNull] LogEventInfo logEvent, [NotNull] TargetWithFilterChain targetsForLevel)
+        {
+            LoggerImpl.Write(DefaultLoggerType, targetsForLevel, PrepareLogEventInfo(logEvent), Factory);
+        }
+
+        private void WriteToTargets(Type wrapperType, [NotNull] LogEventInfo logEvent, [NotNull] TargetWithFilterChain targetsForLevel)
+        {
+            LoggerImpl.Write(wrapperType ?? DefaultLoggerType, targetsForLevel, PrepareLogEventInfo(logEvent), Factory);
         }
 
         internal void SetConfiguration(LoggerConfiguration newConfiguration)
@@ -603,19 +692,22 @@ namespace NLog
             _configuration = newConfiguration;
 
             // pre-calculate 'enabled' flags
-            _isTraceEnabled = newConfiguration.IsEnabled(LogLevel.Trace);
-            _isDebugEnabled = newConfiguration.IsEnabled(LogLevel.Debug);
-            _isInfoEnabled = newConfiguration.IsEnabled(LogLevel.Info);
-            _isWarnEnabled = newConfiguration.IsEnabled(LogLevel.Warn);
-            _isErrorEnabled = newConfiguration.IsEnabled(LogLevel.Error);
-            _isFatalEnabled = newConfiguration.IsEnabled(LogLevel.Fatal);
+            _isTraceEnabled = IsEnabled(LogLevel.Trace);
+            _isDebugEnabled = IsEnabled(LogLevel.Debug);
+            _isInfoEnabled = IsEnabled(LogLevel.Info);
+            _isWarnEnabled = IsEnabled(LogLevel.Warn);
+            _isErrorEnabled = IsEnabled(LogLevel.Error);
+            _isFatalEnabled = IsEnabled(LogLevel.Fatal);
 
             OnLoggerReconfigured(EventArgs.Empty);
         }
 
         private TargetWithFilterChain GetTargetsForLevel(LogLevel level)
         {
-            return _configuration.GetTargetsForLevel(level);
+            if (ReferenceEquals(_contextLogger, this))
+                return _configuration.GetTargetsForLevel(level);
+            else
+                return _contextLogger.GetTargetsForLevel(level);    // Use the LoggerConfiguration of the parent Logger
         }
 
         /// <summary>
@@ -624,11 +716,7 @@ namespace NLog
         /// <param name="e">Event arguments</param>
         protected virtual void OnLoggerReconfigured(EventArgs e)
         {
-            var reconfigured = LoggerReconfigured;
-            if (reconfigured != null)
-            {
-                reconfigured(this, e);
-            }
+            LoggerReconfigured?.Invoke(this, e);
         }
     }
 }

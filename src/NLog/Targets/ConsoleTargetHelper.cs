@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -43,7 +43,7 @@ namespace NLog.Targets
         public static bool IsConsoleAvailable(out string reason)
         {
             reason = string.Empty;
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !MONO && !NETSTANDARD1_5
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !MONO && !NETSTANDARD1_0
             try
             {
                 if (!Environment.UserInteractive)
@@ -72,13 +72,12 @@ namespace NLog.Targets
 
         public static Encoding GetConsoleOutputEncoding(Encoding currentEncoding, bool isInitialized, bool pauseLogging)
         {
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
-            string reason;
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD1_3
             if (currentEncoding != null)
                 return currentEncoding;
-            else if ((isInitialized && !pauseLogging) || IsConsoleAvailable(out reason))
+            else if ((isInitialized && !pauseLogging) || IsConsoleAvailable(out _))
                 return Console.OutputEncoding;
-#if !NETSTANDARD1_5
+#if !NETSTANDARD1_0
             return Encoding.Default;
 #else
             return currentEncoding;
@@ -90,15 +89,22 @@ namespace NLog.Targets
 
         public static bool SetConsoleOutputEncoding(Encoding newEncoding, bool isInitialized, bool pauseLogging)
         {
-#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !NETSTANDARD1_3
             if (!isInitialized)
             {
                 return true;    // Waiting for console target to be initialized
             }
             else if (!pauseLogging)
             {
-                Console.OutputEncoding = newEncoding;   // Can throw exception if console is not availabe
-                return true;
+                try
+                {
+                    Console.OutputEncoding = newEncoding;   // Can throw exception if console is not available
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    InternalLogger.Warn(ex, "Failed changing Console.OutputEncoding to {0}", newEncoding);
+                }
             }
 #endif
             return false;       // No console available

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -63,17 +63,14 @@ namespace NLog
         [MethodImpl(MethodImplOptions.NoInlining)]
         public new T GetCurrentClassLogger()
         {
-#if NETSTANDARD1_5
-            return this.GetLogger(Internal.StackTraceUsageUtils.GetClassFullName());
+#if NETSTANDARD1_0
+            var className = Internal.StackTraceUsageUtils.GetClassFullName();
+#elif SILVERLIGHT
+            var className = Internal.StackTraceUsageUtils.GetClassFullName(new StackFrame(1));
 #else
-#if SILVERLIGHT
-            StackFrame frame = new StackFrame(1);
-#else
-            StackFrame frame = new StackFrame(1, false);
+            var className = Internal.StackTraceUsageUtils.GetClassFullName(new StackFrame(1, false));
 #endif
-
-            return GetLogger(frame.GetMethod().DeclaringType.FullName);
-#endif
+            return GetLogger(className);
         }
     }
 }

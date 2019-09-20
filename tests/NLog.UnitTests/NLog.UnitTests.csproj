@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <RestoreProjectStyle>PackageReference</RestoreProjectStyle>
@@ -18,11 +18,11 @@
     <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
 
-    <DebugType Condition=" '$(Configuration)|$(TargetFramework)' == 'Debug|net452' ">Full</DebugType>
+    <DebugType Condition=" '$(TargetFramework)' == 'net452' ">Full</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(TargetFramework)' == 'net452' AND '$(TestTargetFramework)' == '' ">
-    <DefineConstants>$(DefineConstants);NET4_5</DefineConstants>
+    <DefineConstants>$(DefineConstants);NET4_5;DYNAMIC_OBJECT</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(TargetFramework)' == 'net452' AND '$(TestTargetFramework)' == 'net35' ">
@@ -30,11 +30,11 @@
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(TargetFramework)' == 'net452' AND '$(TestTargetFramework)' == 'net40-client' ">
-    <DefineConstants>$(DefineConstants);NET4_0</DefineConstants>
+    <DefineConstants>$(DefineConstants);NET4_0;DYNAMIC_OBJECT</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(TargetFramework)' == 'netcoreapp2.0' ">
-    <DefineConstants>$(DefineConstants);NETSTANDARD;NET4_5</DefineConstants>
+    <DefineConstants>$(DefineConstants);NETSTANDARD;NET4_5;DYNAMIC_OBJECT</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(monobuild)' != '' ">
@@ -46,18 +46,26 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.5.0-preview-20170923-02" />
-    <PackageReference Include="xunit" Version="2.3.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.3.0" />
-    <DotNetCliToolReference Include="dotnet-xunit" Version="2.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.0.1" />
+    <PackageReference Include="NSubstitute" Version="4.0.0" />
+    <PackageReference Include="xunit" Version="2.4.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.1" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFramework)' == 'netcoreapp2.0' ">
-    <PackageReference Include="System.Data.SqlClient" Version="4.4.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="2.0.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.6.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="2.2.4" />
     <PackageReference Include="System.ServiceModel.NetTcp" Version="4.4.0" />
     <PackageReference Include="System.ServiceModel.Primitives" Version="4.4.0" />
     <PackageReference Include="System.ServiceModel.Security" Version="4.4.0" />
+
+    <ProjectReference Include="..\..\src\NLog.Wcf\NLog.Wcf.csproj">
+      <Private>true</Private>
+    </ProjectReference>
+
+    <ProjectReference Include="..\..\src\NLog.WindowsIdentity\NLog.WindowsIdentity.csproj">
+      <Private>true</Private>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFramework)' == 'net452' ">
@@ -75,9 +83,9 @@
     <Reference Include="System.Messaging" Condition=" '$(monobuild)' == '' " />
     <Reference Include="Microsoft.CSharp" />
 
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.105.2" />
-    <PackageReference Include="Microsoft.Owin.Hosting" Version="3.0.1" />
-    <PackageReference Include="Microsoft.AspNet.WebApi.OwinSelfHost" Version="5.2.3" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.110" />
+    <PackageReference Include="Microsoft.Owin.Hosting" Version="4.0.1" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.OwinSelfHost" Version="5.2.7" />
     <PackageReference Include="DotNetZip.Reduced" Version="1.9.1.8" />
   </ItemGroup>
 
@@ -113,12 +121,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\NLogAutoLoadExtension\NLogAutoLoadExtension.csproj">
+    <ProjectReference Include="..\..\tests\NLogAutoLoadExtension\NLogAutoLoadExtension.csproj">
       <Private>true</Private>
     </ProjectReference>
     <ProjectReference Include="..\..\src\NLog\NLog.csproj">
       <Private>true</Private>
     </ProjectReference>
+    <ProjectReference Include="..\PackageLoaderTestAssembly\PackageLoaderTestAssembly.csproj" />
     <ProjectReference Include="..\SampleExtensions\SampleExtensions.csproj">
       <Private>true</Private>
     </ProjectReference>

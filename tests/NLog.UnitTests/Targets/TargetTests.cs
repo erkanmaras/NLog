@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -84,8 +84,6 @@ namespace NLog.UnitTests.Targets
                       
                         var args = new List<object> { fileTarget };
 
-                
-
                         //default ctor
                         var defaultConstructedTarget = (WrapperTargetBase)Activator.CreateInstance(targetType);
                         defaultConstructedTarget.Name = name;
@@ -94,7 +92,7 @@ namespace NLog.UnitTests.Targets
                         //specials cases
                         if (targetType == typeof(FilteringTargetWrapper))
                         {
-                            var cond = new ConditionLoggerNameExpression();
+                            ConditionLoggerNameExpression cond = null;
                             args.Add(cond);
                             var target = (FilteringTargetWrapper) defaultConstructedTarget;
                             target.Condition = cond;
@@ -611,11 +609,13 @@ namespace NLog.UnitTests.Targets
         [Fact]
         public void WrongMyTargetShouldNotThrowExceptionWhenThrowExceptionsIsFalse()
         {
-            var target = new WrongMyTarget();
-            LogManager.ThrowExceptions = false;
-            SimpleConfigurator.ConfigureForTargetLogging(target);
-            var logger = LogManager.GetLogger("WrongMyTargetShouldThrowException");
-            logger.Info("Testing");
+            using (new NoThrowNLogExceptions())
+            {
+                var target = new WrongMyTarget();
+                SimpleConfigurator.ConfigureForTargetLogging(target);
+                var logger = LogManager.GetLogger("WrongMyTargetShouldThrowException");
+                logger.Info("Testing");
+            }
         }
 
 

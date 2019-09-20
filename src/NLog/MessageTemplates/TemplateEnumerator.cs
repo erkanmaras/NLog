@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -181,9 +181,18 @@ namespace NLog.MessageTemplates
         {
             int start = _position;
             string name = ParseName(out var position);
-            int alignment = Peek() == ',' ? ParseAlignment() : 0;
-            string format = Peek() == ':' ? ParseFormat() : null;
-            Skip('}');
+            int alignment = 0;
+            string format = null;
+            if (Peek() != '}')
+            {
+                alignment = Peek() == ',' ? ParseAlignment() : 0;
+                format = Peek() == ':' ? ParseFormat() : null;
+                Skip('}');
+            }
+            else
+            {
+                _position++;
+            }
 
             int literalSkip = _position - start + (type == CaptureType.Normal ? 1 : 2);     // Account for skipped '{', '{$' or '{@'
             _current = new LiteralHole(new Literal { Print = _literalLength, Skip = (short)literalSkip }, new Hole(
@@ -212,22 +221,10 @@ namespace NLog.MessageTemplates
                     {
                         // Non-allocating positional hole-name-parsing
                         parameterIndex = parsed;
-                        switch (parameterIndex)
-                        {
-                            case 0: return "0";
-                            case 1: return "1";
-                            case 2: return "2";
-                            case 3: return "3";
-                            case 4: return "4";
-                            case 5: return "5";
-                            case 6: return "6";
-                            case 7: return "7";
-                            case 8: return "8";
-                            case 9: return "9";
-                        }
-                        return parameterIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        return ParameterIndexToString(parameterIndex);
                     }
-                    else if (c == ' ')
+
+                    if (c == ' ')
                     {
                         SkipSpaces();
                         c = Peek();
@@ -240,6 +237,25 @@ namespace NLog.MessageTemplates
             }
 
             return ReadUntil(HoleDelimiters);
+        }
+
+        private static string ParameterIndexToString(int parameterIndex)
+        {
+            switch (parameterIndex)
+            {
+                case 0: return "0";
+                case 1: return "1";
+                case 2: return "2";
+                case 3: return "3";
+                case 4: return "4";
+                case 5: return "5";
+                case 6: return "6";
+                case 7: return "7";
+                case 8: return "8";
+                case 9: return "9";
+            }
+
+            return parameterIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -267,7 +283,7 @@ namespace NLog.MessageTemplates
                             }
                             else
                             {
-                                //done. unread the }
+                                //done. unread the '}' .
                                 _position--;
                                 //done
                                 return format;
@@ -301,6 +317,7 @@ namespace NLog.MessageTemplates
         private int ParseAlignment()
         {
             Skip(',');
+            SkipSpaces();
             int i = ReadInt();
             SkipSpaces();
             char next = Peek();
@@ -333,7 +350,7 @@ namespace NLog.MessageTemplates
             int i = _template.IndexOfAny(search, _position);
             if (i == -1 && required)
             {
-                var formattedChars = string.Join(", ", search.Select(c => "'" + c + "'").ToArray());
+                var formattedChars = string.Join(", ", search.Select(c => string.Concat("'", c.ToString(), "'")).ToArray());
                 throw new TemplateParserException($"Reached end of template while expecting one of {formattedChars}.", _position, _template);
             }
             _position = i == -1 ? _length : i;
@@ -342,31 +359,32 @@ namespace NLog.MessageTemplates
 
         private int ReadInt()
         {
-            SkipSpaces();
-
             bool negative = false;
-            if (Peek() == '-')
-            {
-                negative = true;
-                _position++;
-            }
-
             int i = 0;
-            bool hasDigits = false;
-            while (true)
+            for (int x = 0; x < 12; ++x)
             {
-                // Can be out of bounds, but never in correct use (inside a hole).
                 char c = Peek();
+
                 int digit = c - '0';
-                if (digit < 0 || digit > 9) break;
-                hasDigits = true;
+                if (digit < 0 || digit > 9)
+                {
+                    if (x > 0 && !negative || x > 1)
+                        return negative ? -i : i;  // Found one or more digits
+
+                    if (x == 0 && c == '-')
+                    {
+                        negative = true;
+                        _position++;
+                        continue;
+                    }
+                    break;
+                }
+
                 _position++;
                 i = i * 10 + digit;
             }
-            if (!hasDigits)
-                throw new TemplateParserException("An integer is expected", _position, _template);
 
-            return negative ? -i : i;
+            throw new TemplateParserException("An integer is expected", _position, _template);
         }
 
         private string ReadUntil(char[] search, bool required = true)

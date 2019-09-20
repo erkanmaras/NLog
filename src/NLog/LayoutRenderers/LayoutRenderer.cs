@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,15 +31,14 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.Globalization;
-
 namespace NLog.LayoutRenderers
 {
     using System;
+    using System.Globalization;
     using System.Text;
-    using Common;
-    using Config;
-    using Internal;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// Render environmental information related to logging events.
@@ -67,7 +66,7 @@ namespace NLog.LayoutRenderers
             var lra = GetType().GetCustomAttribute<LayoutRendererAttribute>();
             if (lra != null)
             {
-                return "Layout Renderer: ${" + lra.Name + "}";
+                return $"Layout Renderer: ${{{lra.Name}}}";
             }
 
             return GetType().Name;
@@ -152,7 +151,7 @@ namespace NLog.LayoutRenderers
         }
 
         /// <summary>
-        /// Renders the the value of layout renderer in the context of the specified log event.
+        /// Renders the value of layout renderer in the context of the specified log event.
         /// </summary>
         /// <param name="logEvent">The log event.</param>
         /// <param name="builder">The layout render output is appended to builder</param>
@@ -180,7 +179,7 @@ namespace NLog.LayoutRenderers
         }
 
         /// <summary>
-        /// Renders the specified environmental information and appends it to the specified <see cref="StringBuilder" />.
+        /// Renders the value of layout renderer in the context of the specified log event into <see cref="StringBuilder" />.
         /// </summary>
         /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
         /// <param name="logEvent">Logging event.</param>
@@ -220,18 +219,7 @@ namespace NLog.LayoutRenderers
         /// <returns></returns>
         protected IFormatProvider GetFormatProvider(LogEventInfo logEvent, IFormatProvider layoutCulture = null)
         {
-            var culture = logEvent.FormatProvider;
-
-            if (culture == null)
-            {
-                culture = layoutCulture;
-            }
-
-            if (culture == null && LoggingConfiguration != null)
-            {
-                culture = LoggingConfiguration.DefaultCultureInfo;
-            }
-            return culture;
+            return logEvent.FormatProvider ?? layoutCulture ?? LoggingConfiguration?.DefaultCultureInfo;
         }
 
         /// <summary>
@@ -245,12 +233,7 @@ namespace NLog.LayoutRenderers
         /// </remarks>
         protected CultureInfo GetCulture(LogEventInfo logEvent, CultureInfo layoutCulture = null)
         {
-            var culture = logEvent.FormatProvider as CultureInfo;
-
-            if (culture == null)
-            {
-                culture = layoutCulture;
-            }
+            var culture = logEvent.FormatProvider as CultureInfo ?? layoutCulture;
 
             if (culture == null && LoggingConfiguration != null)
             {
@@ -262,7 +245,7 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// Register a custom layout renderer.
         /// </summary>
-        /// <remarks>Short-cut for registing to default <see cref="ConfigurationItemFactory"/></remarks>
+        /// <remarks>Short-cut for registering to default <see cref="ConfigurationItemFactory"/></remarks>
         /// <typeparam name="T"> Type of the layout renderer.</typeparam>
         /// <param name="name"> Name of the layout renderer - without ${}.</param>
         public static void Register<T>(string name)
@@ -275,7 +258,7 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// Register a custom layout renderer.
         /// </summary>
-        /// <remarks>Short-cut for registing to default <see cref="ConfigurationItemFactory"/></remarks>
+        /// <remarks>Short-cut for registering to default <see cref="ConfigurationItemFactory"/></remarks>
         /// <param name="layoutRendererType"> Type of the layout renderer.</param>
         /// <param name="name"> Name of the layout renderer - without ${}.</param>
         public static void Register(string name, Type layoutRendererType)
@@ -285,7 +268,7 @@ namespace NLog.LayoutRenderers
         }
 
         /// <summary>
-        /// Register a custom layout renderer with a callback function <paramref name="func"/>. The callback recieves the logEvent.
+        /// Register a custom layout renderer with a callback function <paramref name="func"/>. The callback receives the logEvent.
         /// </summary>
         /// <param name="name">Name of the layout renderer - without ${}.</param>
         /// <param name="func">Callback that returns the value for the layout renderer.</param>
@@ -295,7 +278,7 @@ namespace NLog.LayoutRenderers
         }
 
         /// <summary>
-        /// Register a custom layout renderer with a callback function <paramref name="func"/>. The callback recieves the logEvent and the current configuration.
+        /// Register a custom layout renderer with a callback function <paramref name="func"/>. The callback receives the logEvent and the current configuration.
         /// </summary>
         /// <param name="name">Name of the layout renderer - without ${}.</param>
         /// <param name="func">Callback that returns the value for the layout renderer.</param>

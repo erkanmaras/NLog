@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !NETSTANDARD
+#if !NETSTANDARD1_5
 
 namespace NLog.UnitTests.Targets
 {
@@ -44,7 +44,9 @@ namespace NLog.UnitTests.Targets
     using NLog.Targets;
     using Xunit;
 	using System.IO;
+#if !NETSTANDARD
     using System.Net.Configuration;
+#endif
 
     public class MailTargetTests : NLogTestBase
     {
@@ -272,47 +274,49 @@ namespace NLog.UnitTests.Targets
         [Fact]
         public void ErrorHandlingTest()
         {
-            LogManager.ThrowExceptions = false;
-            var mmt = new MockMailTarget
+            using (new NoThrowNLogExceptions())
             {
-                From = "foo@bar.com",
-                To = "bar@foo.com",
-                SmtpServer = "${logger}",
-                Body = "${message}",
-                AddNewLines = true,
-            };
+                var mmt = new MockMailTarget
+                {
+                    From = "foo@bar.com",
+                    To = "bar@foo.com",
+                    SmtpServer = "${logger}",
+                    Body = "${message}",
+                    AddNewLines = true,
+                };
 
-            mmt.Initialize(null);
+                mmt.Initialize(null);
 
-            var exceptions = new List<Exception>();
-            var exceptions2 = new List<Exception>();
+                var exceptions = new List<Exception>();
+                var exceptions2 = new List<Exception>();
 
-            mmt.WriteAsyncLogEvents(
-                new LogEventInfo(LogLevel.Info, "MyLogger1", "log message 1").WithContinuation(exceptions.Add),
-                new LogEventInfo(LogLevel.Debug, "ERROR", "log message 2").WithContinuation(exceptions2.Add),
-                new LogEventInfo(LogLevel.Error, "MyLogger1", "log message 3").WithContinuation(exceptions.Add));
-            Assert.Null(exceptions[0]);
-            Assert.Null(exceptions[1]);
+                mmt.WriteAsyncLogEvents(
+                    new LogEventInfo(LogLevel.Info, "MyLogger1", "log message 1").WithContinuation(exceptions.Add),
+                    new LogEventInfo(LogLevel.Debug, "ERROR", "log message 2").WithContinuation(exceptions2.Add),
+                    new LogEventInfo(LogLevel.Error, "MyLogger1", "log message 3").WithContinuation(exceptions.Add));
+                Assert.Null(exceptions[0]);
+                Assert.Null(exceptions[1]);
 
-            Assert.NotNull(exceptions2[0]);
-            Assert.Equal("Some SMTP error.", exceptions2[0].Message);
+                Assert.NotNull(exceptions2[0]);
+                Assert.Equal("Some SMTP error.", exceptions2[0].Message);
 
-            // 2 messages are sent, one using MyLogger1.mydomain.com, another using MyLogger2.mydomain.com
-            Assert.Equal(2, mmt.CreatedMocks.Count);
+                // 2 messages are sent, one using MyLogger1.mydomain.com, another using MyLogger2.mydomain.com
+                Assert.Equal(2, mmt.CreatedMocks.Count);
 
-            var mock1 = mmt.CreatedMocks[0];
-            Assert.Equal("MyLogger1", mock1.Host);
-            Assert.Single(mock1.MessagesSent);
+                var mock1 = mmt.CreatedMocks[0];
+                Assert.Equal("MyLogger1", mock1.Host);
+                Assert.Single(mock1.MessagesSent);
 
-            var msg1 = mock1.MessagesSent[0];
-            Assert.Equal("log message 1\nlog message 3\n", msg1.Body);
+                var msg1 = mock1.MessagesSent[0];
+                Assert.Equal("log message 1\nlog message 3\n", msg1.Body);
 
-            var mock2 = mmt.CreatedMocks[1];
-            Assert.Equal("ERROR", mock2.Host);
-            Assert.Single(mock2.MessagesSent);
+                var mock2 = mmt.CreatedMocks[1];
+                Assert.Equal("ERROR", mock2.Host);
+                Assert.Single(mock2.MessagesSent);
 
-            var msg2 = mock2.MessagesSent[0];
-            Assert.Equal("log message 2\n", msg2.Body);
+                var msg2 = mock2.MessagesSent[0];
+                Assert.Equal("log message 2\n", msg2.Body);
+            }
         }
 
         /// <summary>
@@ -757,7 +761,9 @@ namespace NLog.UnitTests.Targets
                 SmtpPort = 27,
                 Body = "${level} ${logger} ${message}",
                 UseSystemNetMailSettings = true,
+#if !NETSTANDARD
                 SmtpSection = new SmtpSection { From = "config@foo.com" }
+#endif
             };
             Assert.Equal("'nlog@foo.com'", mmt.From.ToString());
 
@@ -769,7 +775,7 @@ namespace NLog.UnitTests.Targets
         [Fact]
         public void MailTarget_UseSystemNetMailSettings_True_ReadFromFromConfigFile()
         {
-
+#if !NETSTANDARD
             var mmt = new MailTarget()
             {
                 From = null,
@@ -785,12 +791,13 @@ namespace NLog.UnitTests.Targets
             mmt.Initialize(null);
 
             Assert.Equal("'config@foo.com'", mmt.From.ToString());
+#endif
         }
 
         [Fact]
         public void MailTarget_UseSystemNetMailSettings_False_ReadFromFromConfigFile()
         {
-
+#if !NETSTANDARD
             var mmt = new MailTarget()
             {
                 From = null,
@@ -804,6 +811,7 @@ namespace NLog.UnitTests.Targets
             Assert.Null(mmt.From);
 
             Assert.Throws <NLogConfigurationException>(() => mmt.Initialize(null));
+#endif
         }
 
         [Fact]
@@ -852,12 +860,12 @@ namespace NLog.UnitTests.Targets
             {
                 if (string.IsNullOrEmpty(Host) && string.IsNullOrEmpty(PickupDirectoryLocation))
                 {
-                    throw new InvalidOperationException("[Host/Pickup directory] is null or empty.");
+                    throw new ApplicationException("[Host/Pickup directory] is null or empty.");
                 }
                 MessagesSent.Add(msg);
                 if (Host == "ERROR")
                 {
-                    throw new InvalidOperationException("Some SMTP error.");
+                    throw new ApplicationException("Some SMTP error.");
                 }
             }
             public void Dispose()

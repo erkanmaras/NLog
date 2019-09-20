@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -73,16 +73,7 @@ namespace NLog.Conditions
             }
 
             // Count the number of required and optional parameters
-            int requiredParametersCount = 0;
-            int optionalParametersCount = 0;
-
-            foreach ( var param in formalParameters )
-            {
-                if ( param.IsOptional )
-                    ++optionalParametersCount;
-                else
-                    ++requiredParametersCount;
-            }
+            CountParmameters(formalParameters, out var requiredParametersCount, out var optionalParametersCount);
 
             if ( !( ( actualParameterCount >= requiredParametersCount ) && ( actualParameterCount <= formalParameters.Length ) ) )
             {
@@ -111,6 +102,11 @@ namespace NLog.Conditions
                 throw new ConditionParseException(message);
             }
 
+            CreateBoundMethod(formalParameters);
+        }
+
+        private void CreateBoundMethod(ParameterInfo[] formalParameters)
+        {
             _lateBoundMethod = Internal.ReflectionHelpers.CreateLateBoundMethod(MethodInfo);
             if (formalParameters.Length > MethodParameters.Count)
             {
@@ -127,12 +123,26 @@ namespace NLog.Conditions
             }
         }
 
+        private static void CountParmameters(ParameterInfo[] formalParameters, out int requiredParametersCount, out int optionalParametersCount)
+        {
+            requiredParametersCount = 0;
+            optionalParametersCount = 0;
+
+            foreach (var param in formalParameters)
+            {
+                if (param.IsOptional)
+                    ++optionalParametersCount;
+                else
+                    ++requiredParametersCount;
+            }
+        }
+
         /// <summary>
         /// Gets the method info.
         /// </summary>
         public MethodInfo MethodInfo { get; private set; }
-        private readonly Internal.ReflectionHelpers.LateBoundMethod _lateBoundMethod;
-        private readonly object[] _lateBoundMethodDefaultParameters;
+        private Internal.ReflectionHelpers.LateBoundMethod _lateBoundMethod;
+        private object[] _lateBoundMethodDefaultParameters;
 
         /// <summary>
         /// Gets the method parameters.
@@ -176,7 +186,7 @@ namespace NLog.Conditions
         protected override object EvaluateNode(LogEventInfo context)
         {
             int parameterOffset = _acceptsLogEvent ? 1 : 0;
-            int parameterDefaults = _lateBoundMethodDefaultParameters != null ? _lateBoundMethodDefaultParameters.Length : 0;
+            int parameterDefaults = _lateBoundMethodDefaultParameters?.Length ?? 0;
 
             var callParameters = new object[MethodParameters.Count + parameterOffset + parameterDefaults];
 

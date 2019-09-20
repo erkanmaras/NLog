@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,9 +35,9 @@ namespace NLog.Targets
 {
     using System;
     using System.Collections.Generic;
-    using Config;
-    using LayoutRenderers;
-    using Layouts;
+    using NLog.Config;
+    using NLog.LayoutRenderers;
+    using NLog.Layouts;
 
     /// <summary>
     /// Sends log messages to the remote instance of NLog Viewer. 
@@ -79,7 +79,10 @@ namespace NLog.Targets
         {
             Parameters = new List<NLogViewerParameterInfo>();
             Renderer.Parameters = Parameters;
+            OnConnectionOverflow = NetworkTargetConnectionsOverflowAction.Block;
+            MaxConnections = 16;
             NewLine = false;
+            OptimizeBufferReuse = GetType() == typeof(NLogViewerTarget);    // Class not sealed, reduce breaking changes
         }
 
         /// <summary>
@@ -157,7 +160,6 @@ namespace NLog.Targets
         }
 
 #if !SILVERLIGHT
-
         /// <summary>
         /// Gets or sets a value indicating whether to include <see cref="MappedDiagnosticsLogicalContext"/> dictionary contents.
         /// </summary>
@@ -178,6 +180,15 @@ namespace NLog.Targets
             set => Renderer.IncludeNdlc = value;
         }
 
+        /// <summary>
+        /// Gets or sets the NDLC item separator.
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public string NdlcItemSeparator
+        {
+            get => Renderer.NdlcItemSeparator;
+            set => Renderer.NdlcItemSeparator = value;
+        }
 #endif
 
         /// <summary>
@@ -198,6 +209,16 @@ namespace NLog.Targets
         {
             get => Renderer.NdcItemSeparator;
             set => Renderer.NdcItemSeparator = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the renderer for log4j:event logger-xml-attribute (Default ${logger})
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public Layout LoggerName
+        {
+            get => Renderer.LoggerName;
+            set => Renderer.LoggerName = value;
         }
 
         /// <summary>
@@ -226,6 +247,7 @@ namespace NLog.Targets
 
             set
             {
+                // Fixed Log4JXmlEventLayout
             }
         }
     }

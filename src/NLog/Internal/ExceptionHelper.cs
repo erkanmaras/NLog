@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,8 +34,8 @@
 namespace NLog.Internal
 {
     using System;
-    using Common;
     using System.Threading;
+    using NLog.Common;
 
     /// <summary>
     /// Helper class for dealing with exceptions.
@@ -83,7 +83,7 @@ namespace NLog.Internal
         {
             if (exception.MustBeRethrownImmediately())
             {
-                //no futher logging, because it can make servere exceptions only worse.
+                //no further logging, because it can make severe exceptions only worse.
                 return true;
             }
 
@@ -110,7 +110,7 @@ namespace NLog.Internal
         /// <returns><c>true</c>if the <paramref name="exception"/> must be rethrown, <c>false</c> otherwise.</returns>
         public static bool MustBeRethrownImmediately(this Exception exception)
         {
-#if !NETSTANDARD1_5
+#if !NETSTANDARD1_0
             if (exception is StackOverflowException)
             {
                 return true;
@@ -127,6 +127,36 @@ namespace NLog.Internal
                 return true;
             }
 
+#if DEBUG
+            if (exception is InvalidCastException)
+            {
+                return true;
+            }
+            if (exception is NullReferenceException)
+            {
+                return true;
+            }
+            if (exception is DivideByZeroException)
+            {
+                return true;
+            }
+            if (exception is OverflowException)
+            {
+                return true;
+            }
+            if (exception is InvalidOperationException)
+            {
+                return true;    // Ex. Collection was modified
+            }
+            if (exception is IndexOutOfRangeException)
+            {
+                return true;
+            }
+            if (exception is System.Reflection.TargetInvocationException)
+            {
+                return true;    // Compiler/reflection exception
+            }
+#endif
             return false;
         }
     }

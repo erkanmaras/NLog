@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,23 +31,21 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System;
-
 namespace NLog.LayoutRenderers
 {
+    using System;
     using System.ComponentModel;
-    using System.Diagnostics;
     using System.IO;
-    using System.Reflection;
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The call site (class name, method name and source information).
     /// </summary>
     [LayoutRenderer("callsite")]
     [ThreadAgnostic]
+    [ThreadSafe]
     public class CallSiteLayoutRenderer : LayoutRenderer, IUsesStackTrace
     {
         /// <summary>
@@ -104,6 +102,7 @@ namespace NLog.LayoutRenderers
         /// <summary>
         /// Gets or sets the number of frames to skip.
         /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(0)]
         public int SkipFrames { get; set; }
 
@@ -148,127 +147,63 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            StackFrame frame = logEvent.StackTrace?.GetFrame(logEvent.UserStackFrameNumber + SkipFrames);
-            if (frame != null)
+            if (logEvent.CallSiteInformation != null)
             {
-                MethodBase method = frame.GetMethod();
-                if (ClassName)
+                if (ClassName || MethodName)
                 {
-                    AppendClassName(builder, method);
-                }
+                    var method = logEvent.CallSiteInformation.GetCallerStackFrameMethod(SkipFrames);
+                    if (ClassName)
+                    {
+                        string className = logEvent.CallSiteInformation.GetCallerClassName(method, IncludeNamespace, CleanNamesOfAsyncContinuations, CleanNamesOfAnonymousDelegates);
+                        if (string.IsNullOrEmpty(className))
+                            className = "<no type>";
+                        builder.Append(className);
+                    }
+                    if (MethodName)
+                    {
+                        string methodName = logEvent.CallSiteInformation.GetCallerMemberName(method, false, CleanNamesOfAsyncContinuations, CleanNamesOfAnonymousDelegates);
+                        if (string.IsNullOrEmpty(methodName))
+                            methodName = "<no method>";
 
-                if (MethodName)
-                {
-                    AppendMethodName(builder, method);
+                        if (ClassName)
+                        {
+                            builder.Append(".");
+                        }
+                        builder.Append(methodName);
+                    }
                 }
 
 #if !SILVERLIGHT
                 if (FileName)
                 {
-                    AppendFileName(builder, frame);
+                    string fileName = logEvent.CallSiteInformation.GetCallerFilePath(SkipFrames);
+                    if (!string.IsNullOrEmpty(fileName))
+                    {
+                        int lineNumber = logEvent.CallSiteInformation.GetCallerLineNumber(SkipFrames);
+                        AppendFileName(builder, fileName, lineNumber);
+                    }
                 }
 #endif
-            }
-        }
-
-        private void AppendClassName(StringBuilder builder, MethodBase method)
-        {
-            var type = method.DeclaringType;
-            if (type != null)
-            {
-
-                if (CleanNamesOfAsyncContinuations && method.Name == "MoveNext" && type.DeclaringType != null && type.Name.StartsWith("<"))
-                {
-                    // NLog.UnitTests.LayoutRenderers.CallSiteTests+<CleanNamesOfAsyncContinuations>d_3'1
-                    int endIndex = type.Name.IndexOf('>', 1);
-                    if (endIndex > 1)
-                    {
-                        type = type.DeclaringType;
-                    }
-                }
-                string className = IncludeNamespace ? type.FullName : type.Name;
-
-                if (CleanNamesOfAnonymousDelegates && className != null)
-                {
-                    // NLog.UnitTests.LayoutRenderers.CallSiteTests+<>c__DisplayClassa
-                    int index = className.IndexOf("+<>", StringComparison.Ordinal);
-                    if (index >= 0)
-                    {
-                        className = className.Substring(0, index);
-                    }
-                }
-
-                builder.Append(className);
-            }
-            else
-            {
-                builder.Append("<no type>");
-            }
-        }
-
-        private void AppendMethodName(StringBuilder builder, MethodBase method)
-        {
-            if (ClassName)
-            {
-                builder.Append(".");
-            }
-
-            if (method != null)
-            {
-                string methodName = method.Name;
-
-                var type = method.DeclaringType;
-                if (CleanNamesOfAsyncContinuations && method.Name == "MoveNext" && type?.DeclaringType != null && type.Name.StartsWith("<"))
-                {
-                    // NLog.UnitTests.LayoutRenderers.CallSiteTests+<CleanNamesOfAsyncContinuations>d_3'1.MoveNext
-                    int endIndex = type.Name.IndexOf('>', 1);
-                    if (endIndex > 1)
-                    {
-                        methodName = type.Name.Substring(1, endIndex - 1);
-                    }
-                }
-
-                // Clean up the function name if it is an anonymous delegate
-                // <.ctor>b__0
-                // <Main>b__2
-                if (CleanNamesOfAnonymousDelegates && (methodName.StartsWith("<") && methodName.Contains("__") && methodName.Contains(">")))
-                {
-                    int startIndex = methodName.IndexOf('<') + 1;
-                    int endIndex = methodName.IndexOf('>');
-
-                    methodName = methodName.Substring(startIndex, endIndex - startIndex);
-                }
-
-                builder.Append(methodName);
-            }
-            else
-            {
-                builder.Append("<no method>");
             }
         }
 
 #if !SILVERLIGHT
-        private void AppendFileName(StringBuilder builder, StackFrame frame)
+        private void AppendFileName(StringBuilder builder, string fileName, int lineNumber)
         {
-            string fileName = frame.GetFileName();
-            if (fileName != null)
+            builder.Append("(");
+            if (IncludeSourcePath)
             {
-                builder.Append("(");
-                if (IncludeSourcePath)
-                {
-                    builder.Append(fileName);
-                }
-                else
-                {
-                    builder.Append(Path.GetFileName(fileName));
-                }
-
-                builder.Append(":");
-                builder.Append(frame.GetFileLineNumber());
-                builder.Append(")");
+                builder.Append(fileName);
             }
+            else
+            {
+                builder.Append(Path.GetFileName(fileName));
+            }
+
+            builder.Append(":");
+            builder.AppendInvariant(lineNumber);
+            builder.Append(")");
         }
 #endif
-
     }
 }

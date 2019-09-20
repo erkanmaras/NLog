@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,10 +36,10 @@ namespace NLog.LayoutRenderers
     using System;
     using System.IO;
     using System.Text;
-    using Common;
-    using Config;
-    using Internal;
-    using Layouts;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
+    using NLog.Layouts;
 
     /// <summary>
     /// Renders contents of the specified file.
@@ -47,6 +47,8 @@ namespace NLog.LayoutRenderers
     [LayoutRenderer("file-contents")]
     public class FileContentsLayoutRenderer : LayoutRenderer
     {
+        private readonly object _lockObject = new object();
+
         private string _lastFileName;
         private string _currentFileContents;
 
@@ -55,7 +57,7 @@ namespace NLog.LayoutRenderers
         /// </summary>
         public FileContentsLayoutRenderer()
         {
-#if SILVERLIGHT || NETSTANDARD1_5
+#if SILVERLIGHT || NETSTANDARD1_0
             this.Encoding = Encoding.UTF8;
 #else
             Encoding = Encoding.Default;
@@ -84,7 +86,7 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            lock (this)
+            lock (_lockObject)
             {
                 string fileName = FileName.Render(logEvent);
 
@@ -102,7 +104,7 @@ namespace NLog.LayoutRenderers
         {
             try
             {
-#if NETSTANDARD1_5
+#if NETSTANDARD1_0
                 return File.ReadAllText(fileName, Encoding);
 #else
                 using (var reader = new StreamReader(fileName, Encoding))

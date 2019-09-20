@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -34,14 +34,17 @@
 
 namespace NLog.Layouts
 {
-    using Config;
     using System.Collections.Generic;
     using System.Text;
+    using NLog.Config;
 
     /// <summary>
     /// A layout containing one or more nested layouts.
     /// </summary>
     [Layout("CompoundLayout")]
+    [ThreadAgnostic]
+    [ThreadSafe]
+    [AppDomainFixedOutput]
     public class CompoundLayout : Layout
     {
         /// <summary>
@@ -55,7 +58,7 @@ namespace NLog.Layouts
         /// <summary>
         /// Gets the inner layouts.
         /// </summary>
-        /// <docgen category='CSV Options' order='10' />
+        /// <docgen category='Layout Options' order='10' />
         [ArrayParameter(typeof(Layout), "layout")]
         public IList<Layout> Layouts { get; private set; }
 
@@ -67,6 +70,11 @@ namespace NLog.Layouts
             base.InitializeLayout();
             foreach (var layout in Layouts)
                 layout.Initialize(LoggingConfiguration);
+        }
+
+        internal override void PrecalculateBuilder(LogEventInfo logEvent, StringBuilder target)
+        {
+            PrecalculateBuilderInternal(logEvent, target);
         }
 
         /// <summary>
@@ -103,6 +111,15 @@ namespace NLog.Layouts
             foreach (var layout in Layouts)
                 layout.Close();
             base.CloseLayout();
+        }
+
+        /// <summary>
+        /// Generate description of Compound Layout
+        /// </summary>
+        /// <returns>Compound Layout String Description</returns>
+        public override string ToString()
+        {
+            return ToStringWithNestedItems(Layouts, l => l.ToString());
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -35,10 +35,12 @@
 
 namespace NLog.UnitTests.LayoutRenderers
 {
+    using System.Collections.Generic;
     using System.Collections.Specialized;
+    using System.Configuration;
     using NLog.Internal;
     using NLog.LayoutRenderers;
-	using Xunit;
+    using Xunit;
 
     public class AppSettingTests : NLogTestBase
     {
@@ -48,10 +50,10 @@ namespace NLog.UnitTests.LayoutRenderers
             var configurationManager = new MockConfigurationManager();
             const string expected = "appSettingTestValue";
             configurationManager.AppSettings["appSettingTestKey"] = expected;
-            var appSettingLayoutRenderer = new AppSettingLayoutRenderer
+            var appSettingLayoutRenderer = new AppSettingLayoutRenderer2
             {
                 ConfigurationManager = configurationManager,
-                Name = "appSettingTestKey",
+                Item = "appSettingTestKey",
             };
 
             var rendered = appSettingLayoutRenderer.Render(LogEventInfo.CreateNullEvent());
@@ -65,10 +67,10 @@ namespace NLog.UnitTests.LayoutRenderers
             var configurationManager = new MockConfigurationManager();
             const string expected = "appSettingTestValue";
             configurationManager.AppSettings["appSettingTestKey"] = expected;
-            var appSettingLayoutRenderer = new AppSettingLayoutRenderer
+            var appSettingLayoutRenderer = new AppSettingLayoutRenderer2
             {
                 ConfigurationManager = configurationManager,
-                Name = "appSettingTestKey",
+                Item = "appSettingTestKey",
                 Default = "UseDefault",
             };
 
@@ -82,10 +84,10 @@ namespace NLog.UnitTests.LayoutRenderers
         {
             var configurationManager = new MockConfigurationManager();
             const string expected = "UseDefault";
-            var appSettingLayoutRenderer = new AppSettingLayoutRenderer
+            var appSettingLayoutRenderer = new AppSettingLayoutRenderer2
             {
                 ConfigurationManager = configurationManager,
-                Name = "notFound",
+                Item = "notFound",
                 Default = "UseDefault",
             };
 
@@ -98,10 +100,10 @@ namespace NLog.UnitTests.LayoutRenderers
         public void NoAppSettingTest()
         {
             var configurationManager = new MockConfigurationManager();
-            var appSettingLayoutRenderer = new AppSettingLayoutRenderer
+            var appSettingLayoutRenderer = new AppSettingLayoutRenderer2
             {
                 ConfigurationManager = configurationManager,
-                Name = "notFound",
+                Item = "notFound",
             };
 
             var rendered = appSettingLayoutRenderer.Render(LogEventInfo.CreateNullEvent());
@@ -109,14 +111,34 @@ namespace NLog.UnitTests.LayoutRenderers
             Assert.Equal(string.Empty, rendered);
         }
 
-        private class MockConfigurationManager : IConfigurationManager
+        [Fact]
+        public void UseConnectionStringTest()
         {
-            public MockConfigurationManager()
+            var configurationManager = new MockConfigurationManager();
+            const string expected = "Hello Connection";
+            configurationManager.ConnectionStrings["myConnection"] = new ConnectionStringSettings() { ConnectionString = expected };
+            var appSettingLayoutRenderer = new AppSettingLayoutRenderer2
             {
-                AppSettings = new NameValueCollection();
-            }
+                ConfigurationManager = configurationManager,
+                Item = "ConnectionStrings.myConnection",
+            };
 
-            public NameValueCollection AppSettings { get; private set; }
+            var rendered = appSettingLayoutRenderer.Render(LogEventInfo.CreateNullEvent());
+
+            Assert.Equal(expected, rendered);
+        }
+
+        private class MockConfigurationManager : IConfigurationManager2
+        {
+            public NameValueCollection AppSettings { get; } = new NameValueCollection();
+
+            public Dictionary<string, ConnectionStringSettings> ConnectionStrings { get; } = new Dictionary<string, ConnectionStringSettings>();
+
+            public ConnectionStringSettings LookupConnectionString(string name)
+            {
+                ConnectionStrings.TryGetValue(name, out var value);
+                return value;
+            }
         }
     }
 }

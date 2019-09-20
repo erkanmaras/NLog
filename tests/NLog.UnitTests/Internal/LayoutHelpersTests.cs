@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -97,7 +97,7 @@ namespace NLog.UnitTests.Internal
 
 
         /// <summary>
-        /// test with both default. True or false, case insentive, no numbers
+        /// test with both default. True or false, case-insensitive, no numbers
         /// </summary>
         /// <param name="input"></param>
         /// <param name="expected">null = default</param>
@@ -138,7 +138,7 @@ namespace NLog.UnitTests.Internal
 
         private static LogEventInfo CreateLogEvent(string input)
         {
-            var logEvent = new LogEventInfo();
+            var logEvent = LogEventInfo.CreateNullEvent();
             logEvent.Properties["val"] = input;
             return logEvent;
         }

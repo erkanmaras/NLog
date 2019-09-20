@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -45,7 +45,7 @@ namespace NLog.UnitTests.Config
         [Fact]
         public void VariablesTest1()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
     <variable name='prefix' value='[[' />
     <variable name='suffix' value=']]' />
@@ -73,10 +73,10 @@ namespace NLog.UnitTests.Config
         /// <summary>
         /// Expand of property which are not layoutable <see cref="Layout"/>, but still get expanded.
         /// </summary>
-        [Fact(Skip = "It's unclear if this is a bug of a feature. Probably this will a config setting in the feature")]
+        [Fact]
         public void VariablesTest_string_expanding()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
   <variable name='test' value='hello'/>
   <targets>
@@ -88,13 +88,60 @@ namespace NLog.UnitTests.Config
             Assert.NotNull(target);
             //dont change the ${test} as it isn't a Layout
             Assert.NotEqual(typeof(Layout), target.DBProvider.GetType());
-            Assert.Equal("${test}", target.DBProvider);
+            Assert.Equal("hello", target.DBProvider);
+        }
+
+        [Fact]
+        public void VariablesTest_minLevel_expanding()
+        {
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+<nlog throwExceptions='true'>
+   <variable name='test' value='debug'/>
+    <rules>
+      <logger minLevel='${test}' final='true' />
+    </rules>
+</nlog>");
+
+            var rule = configuration.LoggingRules[0];
+            Assert.NotNull(rule);
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Trace));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Debug));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Info));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Warn));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Error));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Fatal));
+
+        }        
+        
+        /// <summary>
+        /// Expand of level attributes
+        /// </summary>
+        [Fact]
+        public void VariablesTest_Level_expanding()
+        {
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+<nlog throwExceptions='true'>
+   <variable name='test' value='debug'/>
+    <rules>
+      <logger level='${test}' final='true' />
+    </rules>
+</nlog>");
+
+            var rule = configuration.LoggingRules[0];
+            Assert.NotNull(rule);
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Trace));
+            Assert.True(rule.IsLoggingEnabledForLevel(LogLevel.Debug));
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Info));
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Warn));
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Error));
+            Assert.False(rule.IsLoggingEnabledForLevel(LogLevel.Fatal));
+
         }
 
         [Fact]
         public void Xml_configuration_returns_defined_variables()
         {
-            var configuration = CreateConfigurationFromString(@"
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
 <nlog throwExceptions='true'>
     <variable name='prefix' value='[[' />
     <variable name='suffix' value=']]' />
@@ -108,6 +155,42 @@ namespace NLog.UnitTests.Config
 
             Assert.Equal("[[", LogManager.Configuration.Variables["prefix"].OriginalText);
             Assert.Equal("]]", LogManager.Configuration.Variables["suffix"].OriginalText);
+        }
+
+        [Fact]
+        public void Xml_configuration_with_inner_returns_defined_variables_withValueElement()
+        {
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+<nlog throwExceptions='true'>
+    <variable name='prefix'>
+
+<value><![CDATA[
+newline
+]]></value>
+
+</variable>
+    <variable name='suffix'><value>]]</value></variable>
+</nlog>");
+
+            var nullEvent = LogEventInfo.CreateNullEvent();
+
+            // Act & Assert
+            Assert.Equal("\nnewline\n", configuration.Variables["prefix"].Render(nullEvent).Replace("\r", ""));
+            Assert.Equal("]]", configuration.Variables["suffix"].Render(nullEvent));
+        }
+
+        [Fact]
+        public void Xml_configuration_variableWithInnerAndAttribute_attributeHasPrecedence()
+        {
+            var configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+<nlog throwExceptions='true'>
+    <variable name='var1' value='1'><value>2</value></variable>
+</nlog>");
+
+            var nullEvent = LogEventInfo.CreateNullEvent();
+
+            // Act & Assert
+            Assert.Equal("1", configuration.Variables["var1"].FixedText);
         }
 
         [Fact]
@@ -138,11 +221,11 @@ namespace NLog.UnitTests.Config
                     </nlog>";
 
             NLogConfigurationException nlogConfEx_ForInnerTargets = Assert.Throws<NLogConfigurationException>(
-                () => CreateConfigurationFromString(configurationString_VariableNodeIsInnerTargets)
+                () => XmlLoggingConfiguration.CreateFromXmlString(configurationString_VariableNodeIsInnerTargets)
                 );
 
             NLogConfigurationException nlogConfExForAfterTargets = Assert.Throws<NLogConfigurationException>(
-                () => CreateConfigurationFromString(configurationString_VariableNodeIsAfterTargets)
+                () => XmlLoggingConfiguration.CreateFromXmlString(configurationString_VariableNodeIsAfterTargets)
                 );
         }
     }

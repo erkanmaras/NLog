@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -77,6 +77,20 @@ namespace NLog.UnitTests.Conditions
             AssertEvaluationResult(false, "contains('foobar','oobe')");
             AssertEvaluationResult(false, "contains('','foo')");
             AssertEvaluationResult(true, "contains('foo','')");
+
+            AssertEvaluationResult(true, "regex-matches('foo', '^foo$')");
+            AssertEvaluationResult(false, "regex-matches('foo', '^bar$')");
+            
+            //Check that calling with empty string is equivalent with not passing the parameter
+            AssertEvaluationResult(true, "regex-matches('foo', '^foo$', '')");
+            AssertEvaluationResult(false, "regex-matches('foo', '^bar$', '')");
+
+            //Check that options are parsed correctly
+            AssertEvaluationResult(true, "regex-matches('Foo', '^foo$', 'ignorecase')");
+            AssertEvaluationResult(false, "regex-matches('Foo', '^foo$')");
+            AssertEvaluationResult(true, "regex-matches('foo\nbar', '^Foo$', 'ignorecase,multiline')");
+            AssertEvaluationResult(false, "regex-matches('foo\nbar', '^Foo$')");
+            Assert.Throws<ConditionEvaluationException>(() => AssertEvaluationResult(true, "regex-matches('foo\nbar', '^Foo$', 'ignorecase,nonexistent')"));
         }
 
         [Fact]
@@ -228,7 +242,7 @@ namespace NLog.UnitTests.Conditions
             Assert.Equal(false, ConditionParser.ParseExpression("false == ToInt16(4)", factories).Evaluate(CreateWellKnownContext()));
             Assert.Equal(false, ConditionParser.ParseExpression("ToInt16(1) == false", factories).Evaluate(CreateWellKnownContext()));
 
-            //this is doing string comparision as thats the common type which works in this case.
+            //this is doing string comparision as that's the common type which works in this case.
             Assert.Equal(false, ConditionParser.ParseExpression("ToDateTime('2010/01/01') == '20xx/01/01'", factories).Evaluate(CreateWellKnownContext()));
         }
 

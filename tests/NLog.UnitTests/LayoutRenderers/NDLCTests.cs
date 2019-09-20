@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Config;
+
 namespace NLog.UnitTests.LayoutRenderers
 {
     using Xunit;
@@ -40,7 +42,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void NDLCTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc} ${message}' /></targets>
                 <rules>
@@ -84,7 +86,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void NDLCTopTestTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc:topframes=2} ${message}' /></targets>
                 <rules>
@@ -129,7 +131,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void NDLCTop1TestTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc:topframes=1} ${message}' /></targets>
                 <rules>
@@ -167,18 +169,18 @@ namespace NLog.UnitTests.LayoutRenderers
             }
             LogManager.GetLogger("A").Debug("0");
             AssertDebugLastMessage("debug", " 0");
-            Assert.Equal(string.Empty, NestedDiagnosticsLogicalContext.PopObject());
+            Assert.Null(NestedDiagnosticsLogicalContext.Pop()); //inconsistent with NDC - should be string.empty, but for backwardsscomp. Fix in NLog 5
             NestedDiagnosticsLogicalContext.Push("zzz");
             NestedDiagnosticsLogicalContext.Push("yyy");
-            Assert.Equal("yyy", NestedDiagnosticsLogicalContext.PopObject());
+            Assert.Equal("yyy", NestedDiagnosticsLogicalContext.Pop());
             NestedDiagnosticsLogicalContext.Clear();
-            Assert.Equal(string.Empty, NestedDiagnosticsLogicalContext.PopObject());
+            Assert.Null(NestedDiagnosticsLogicalContext.Pop()); //inconsistent with NDC - should be string.empty, but for backwardsscomp. Fix in NLog 5
         }
 
         [Fact]
         public void NDLCBottomTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc:bottomframes=2} ${message}' /></targets>
                 <rules>
@@ -222,7 +224,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void NDLCSeparatorTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc:separator=\:} ${message}' /></targets>
                 <rules>
@@ -266,7 +268,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void NDLCDeepTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${ndlc:topframes=1} ${message}' /></targets>
                 <rules>
@@ -289,6 +291,104 @@ namespace NLog.UnitTests.LayoutRenderers
             NestedDiagnosticsLogicalContext.Clear();
             LogManager.GetLogger("A").Debug("2");
             AssertDebugLastMessage("debug", " 2");
+        }
+
+        [Fact]
+        public void NDLCTimingTest()
+        {
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${ndlc}|${ndlctiming:CurrentScope=false:ScopeBeginTime=true:Format=yyyy-MM-dd HH\:mm\:ss}|${ndlctiming:CurrentScope=false:ScopeBeginTime=false:Format=fff}|${ndlctiming:CurrentScope=true:ScopeBeginTime=true:Format=HH\:mm\:ss.fff}|${ndlctiming:CurrentScope=true:ScopeBeginTime=false:Format=fffffff}|${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            NestedDiagnosticsLogicalContext.Clear();
+            LogManager.GetLogger("A").Debug("0");
+            AssertDebugLastMessage("debug", "|||||0");
+            using (NestedDiagnosticsLogicalContext.Push("ala"))
+            {
+                LogManager.GetLogger("A").Debug("a");
+                var measurements = GetDebugLastMessage("debug").Split(new[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+                Assert.Equal(6, measurements.Length);
+                Assert.Equal("ala", measurements[0]);
+#if !NET3_5
+                Assert.InRange(int.Parse(measurements[2]), 0, 999);
+                Assert.InRange(int.Parse(measurements[4]), 0, 9999999);
+#endif
+                Assert.Equal("a", measurements[measurements.Length-1]);
+
+                System.Threading.Thread.Sleep(10);
+
+                LogManager.GetLogger("A").Debug("b");
+                measurements = GetDebugLastMessage("debug").Split(new[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+                Assert.Equal("ala", measurements[0]);
+#if !NET3_5
+                Assert.InRange(int.Parse(measurements[2]), 10, 999);
+                Assert.InRange(int.Parse(measurements[4]), 100000, 9999999);
+#endif
+                Assert.Equal("b", measurements[measurements.Length - 1]);
+
+                using (NestedDiagnosticsLogicalContext.Push("ma"))
+                {
+                    LogManager.GetLogger("A").Debug("a");
+                    measurements = GetDebugLastMessage("debug").Split(new[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+                    Assert.Equal(6, measurements.Length);
+                    Assert.Equal("ala ma", measurements[0]);
+#if !NET3_5
+                    Assert.InRange(int.Parse(measurements[2]), 10, 999);
+                    Assert.InRange(int.Parse(measurements[4]), 0, 9999999);
+#endif
+                    Assert.Equal("a", measurements[measurements.Length - 1]);
+
+                    System.Threading.Thread.Sleep(10);
+
+                    LogManager.GetLogger("A").Debug("b");
+                    measurements = GetDebugLastMessage("debug").Split(new[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+                    Assert.Equal(6, measurements.Length);
+                    Assert.Equal("ala ma", measurements[0]);
+#if !NET3_5
+                    Assert.InRange(int.Parse(measurements[2]), 20, 999);
+                    Assert.InRange(int.Parse(measurements[4]), 100000, 9999999);
+#endif
+                    Assert.Equal("b", measurements[measurements.Length - 1]);
+                }
+
+                LogManager.GetLogger("A").Debug("c");
+                measurements = GetDebugLastMessage("debug").Split(new[] { '|' }, System.StringSplitOptions.RemoveEmptyEntries);
+                Assert.Equal("ala", measurements[0]);
+#if !NET3_5
+                Assert.InRange(int.Parse(measurements[2]), 20, 999);
+                Assert.InRange(int.Parse(measurements[4]), 200000, 9999999);
+#endif
+                Assert.Equal("c", measurements[measurements.Length - 1]);
+            }
+
+            LogManager.GetLogger("A").Debug("0");
+            AssertDebugLastMessage("debug", "|||||0");
+        }
+
+        [Fact]
+        public void NDLCAsyncLogging()
+        {
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${ndlc:separator=\:} ${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            System.Threading.Tasks.Task task;
+            using (NestedDiagnosticsLogicalContext.Push("ala"))
+            {
+                LogManager.GetLogger("A").Debug("a");
+                AssertDebugLastMessage("debug", "ala a");
+                task = System.Threading.Tasks.Task.Run(async () => { await System.Threading.Tasks.Task.Delay(50); LogManager.GetLogger("B").Debug("b"); });
+            }
+            task.Wait();
+            AssertDebugLastMessage("debug", "ala b");
         }
     }
 }

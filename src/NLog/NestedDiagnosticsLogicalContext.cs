@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,8 +36,8 @@ namespace NLog
 {
 #if !SILVERLIGHT
     using System;
-    using Internal;
-	using System.Linq;
+    using System.Linq;
+    using NLog.Internal;
 
     /// <summary>
     /// Async version of <see cref="NestedDiagnosticsContext" /> - a logical context structure that keeps a stack
@@ -53,18 +53,30 @@ namespace NLog
         public static IDisposable Push<T>(T value)
         {
             var parent = GetThreadLocal();
-            var current = new NestedContext<T>(parent, value);
+            var current = NestedContext<T>.CreateNestedContext(parent, value);
             SetThreadLocal(current);
             return current;
+        }
+
+        /// <summary>
+        /// Pushes the specified value on current stack
+        /// </summary>
+        /// <param name="value">The value to be pushed.</param>
+        /// <returns>An instance of the object that implements IDisposable that returns the stack to the previous level when IDisposable.Dispose() is called. To be used with C# using() statement.</returns>
+        public static IDisposable PushObject(object value)
+        {
+            return Push(value);
         }
 
         /// <summary>
         /// Pops the top message off the NDLC stack.
         /// </summary>
         /// <returns>The top message which is no longer on the stack.</returns>
-        public static string Pop()
+        /// <remarks>this methods returns a object instead of string, this because of backwards-compatibility</remarks>
+        public static object Pop()
         {
-            return Pop(null);
+            //NLOG 5: return string (breaking change)
+            return PopObject();
         }
 
         /// <summary>
@@ -74,19 +86,61 @@ namespace NLog
         /// <returns>The top message, which is removed from the stack, as a string value.</returns>
         public static string Pop(IFormatProvider formatProvider)
         {
-            return FormatHelper.ConvertToString(PopObject(), formatProvider);
+            return FormatHelper.ConvertToString(PopObject() ?? string.Empty, formatProvider);
         }
 
         /// <summary>
-        /// Pops the top message off the current stack
+        /// Pops the top message off the current NDLC stack
         /// </summary>
-        /// <returns>The top message which is no longer on the stack.</returns>
+        /// <returns>The object from the top of the NDLC stack, if defined; otherwise <c>null</c>.</returns>
         public static object PopObject()
         {
             var current = GetThreadLocal();
             if (current != null)
                 SetThreadLocal(current.Parent);
-            return current != null ? current.Value : string.Empty;
+            return current?.Value;
+        }
+
+        /// <summary>
+        /// Peeks the top object on the current NDLC stack
+        /// </summary>
+        /// <returns>The object from the top of the NDLC stack, if defined; otherwise <c>null</c>.</returns>
+        public static object PeekObject()
+        {
+            return PeekContext(false)?.Value;
+        }
+
+        /// <summary>
+        /// Peeks the current scope, and returns its start time
+        /// </summary>
+        /// <returns>Scope Creation Time</returns>
+        internal static DateTime PeekTopScopeBeginTime()
+        {
+            return new DateTime(PeekContext(false)?.CreatedTimeUtcTicks ?? DateTime.MinValue.Ticks, DateTimeKind.Utc);
+        }
+
+        /// <summary>
+        /// Peeks the first scope, and returns its start time
+        /// </summary>
+        /// <returns>Scope Creation Time</returns>
+        internal static DateTime PeekBottomScopeBeginTime()
+        {
+            return new DateTime(PeekContext(true)?.CreatedTimeUtcTicks ?? DateTime.MinValue.Ticks, DateTimeKind.Utc);
+        }
+
+        private static INestedContext PeekContext(bool bottomScope)
+        {
+            var current = GetThreadLocal();
+            if (current != null)
+            {
+                if (bottomScope)
+                {
+                    while (current.Parent != null)
+                        current = current.Parent;
+                }
+                return current;
+            }
+            return null;
         }
 
         /// <summary>
@@ -141,34 +195,69 @@ namespace NLog
             INestedContext Parent { get; }
             int FrameLevel { get; }
             object Value { get; }
+            long CreatedTimeUtcTicks { get; }
         }
 
-#if !NETSTANDARD1_5
+#if !NETSTANDARD1_0
         [Serializable]
 #endif
         class NestedContext<T> : INestedContext
         {
-            public INestedContext Parent { get; private set; }
-            public T Value { get; private set; }
-            object INestedContext.Value => Value;
-            public int FrameLevel { get; private set; }
+            public INestedContext Parent { get; }
+            public T Value { get; }
+            public long CreatedTimeUtcTicks { get; }
+            public int FrameLevel { get; }
+            private int _disposed;
+
+            public static INestedContext CreateNestedContext(INestedContext parent, T value)
+            {
+#if NET4_6 || NETSTANDARD
+                return new NestedContext<T>(parent, value);
+#else
+                if (typeof(T).IsValueType || Convert.GetTypeCode(value) != TypeCode.Object)
+                    return new NestedContext<T>(parent, value);
+                else
+                    return new NestedContext<ObjectHandleSerializer>(parent, new ObjectHandleSerializer(value));
+#endif
+            }
+
+            object INestedContext.Value
+            {
+                get
+                {
+#if NET4_6 || NETSTANDARD
+                    return Value;
+#else
+                    object value = Value;
+                    if (value is ObjectHandleSerializer objectHandle)
+                    {
+                        return objectHandle.Unwrap();
+                    }
+                    return value;
+#endif
+                }
+            }
 
             public NestedContext(INestedContext parent, T value)
             {
                 Parent = parent;
                 Value = value;
-                FrameLevel = parent != null ? parent.FrameLevel + 1 : 1; 
+                CreatedTimeUtcTicks = DateTime.UtcNow.Ticks; // Low time resolution, but okay fast
+                FrameLevel = parent?.FrameLevel + 1 ?? 1;
             }
 
             void IDisposable.Dispose()
             {
-                PopObject();
+                if (System.Threading.Interlocked.Exchange(ref _disposed, 1) != 1)
+                {
+                    PopObject();
+                }
             }
 
             public override string ToString()
             {
                 object value = Value;
-                return value != null ? value.ToString() : "null";
+                return value?.ToString() ?? "null";
             }
         }
 

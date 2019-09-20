@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !NETSTANDARD1_3
 
 namespace NLog.LayoutRenderers
 {
@@ -40,34 +40,25 @@ namespace NLog.LayoutRenderers
     using System.Diagnostics;
     using System.Reflection;
     using System.Text;
-    using Config;
-    using Internal;
+    using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The information about the running process.
     /// </summary>
     [LayoutRenderer("processinfo")]
+    [ThreadSafe]
     public class ProcessInfoLayoutRenderer : LayoutRenderer
     {
         private Process _process;
-
-        private PropertyInfo _propertyInfo;
         private ReflectionHelpers.LateBoundMethod _lateBoundPropertyGet;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ProcessInfoLayoutRenderer" /> class.
-        /// </summary>
-        public ProcessInfoLayoutRenderer()
-        {
-            Property = ProcessInfoProperty.Id;
-        }
 
         /// <summary>
         /// Gets or sets the property to retrieve.
         /// </summary>
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue("Id"), DefaultParameter]
-        public ProcessInfoProperty Property { get; set; }
+        public ProcessInfoProperty Property { get; set; } = ProcessInfoProperty.Id;
 
         /// <summary>
         /// Gets or sets the format-string to use if the property supports it (Ex. DateTime / TimeSpan / Enum)
@@ -76,26 +67,22 @@ namespace NLog.LayoutRenderers
         [DefaultValue(null)]
         public string Format { get; set; }
 
-        /// <summary>
-        /// Initializes the layout renderer.
-        /// </summary>
+        /// <inheritdoc />
         protected override void InitializeLayoutRenderer()
         {
             base.InitializeLayoutRenderer();
-            _propertyInfo = typeof(Process).GetProperty(Property.ToString());
-            if (_propertyInfo == null)
+            var propertyInfo = typeof(Process).GetProperty(Property.ToString());
+            if (propertyInfo == null)
             {
-                throw new ArgumentException("Property '" + _propertyInfo + "' not found in System.Diagnostics.Process");
+                throw new ArgumentException($"Property '{Property}' not found in System.Diagnostics.Process");
             }
 
-            _lateBoundPropertyGet = ReflectionHelpers.CreateLateBoundMethod(_propertyInfo.GetGetMethod());
+            _lateBoundPropertyGet = ReflectionHelpers.CreateLateBoundMethod(propertyInfo.GetGetMethod());
 
             _process = Process.GetCurrentProcess();
         }
 
-        /// <summary>
-        /// Closes the layout renderer.
-        /// </summary>
+        /// <inheritdoc />
         protected override void CloseLayoutRenderer()
         {
             if (_process != null)
@@ -107,19 +94,20 @@ namespace NLog.LayoutRenderers
             base.CloseLayoutRenderer();
         }
 
-        /// <summary>
-        /// Renders the selected process information.
-        /// </summary>
-        /// <param name="builder">The <see cref="StringBuilder"/> to append the rendered data to.</param>
-        /// <param name="logEvent">Logging event.</param>
+        /// <inheritdoc />
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            if (_lateBoundPropertyGet != null)
+            var value = GetValue();
+            if (value != null)
             {
                 var formatProvider = GetFormatProvider(logEvent);
-                var value = _lateBoundPropertyGet(_process, null);
                 builder.AppendFormattedValue(value, Format, formatProvider);
             }
+        }
+
+        private object GetValue()
+        {
+            return _lateBoundPropertyGet?.Invoke(_process, null);
         }
     }
 }

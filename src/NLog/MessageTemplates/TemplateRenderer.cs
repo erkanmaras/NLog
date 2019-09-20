@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -55,19 +55,21 @@ namespace NLog.MessageTemplates
         {
             int pos = 0;
             int holeIndex = 0;
+            int holeStartPosition = 0;
             messageTemplateParameters = null;
+            int originalLength = sb.Length;
 
-            TemplateEnumerator holeEnumerator = new TemplateEnumerator(template);
-            while (holeEnumerator.MoveNext())
+            TemplateEnumerator templateEnumerator = new TemplateEnumerator(template);
+            while (templateEnumerator.MoveNext())
             {
-                var literal = holeEnumerator.Current.Literal;
-                if (holeIndex == 0 && !forceTemplateRenderer && sb.Length == 0 && literal.Skip != 0 && holeEnumerator.Current.Hole.Index != -1)
+                if (holeIndex == 0 && !forceTemplateRenderer && templateEnumerator.Current.MaybePositionalTemplate && sb.Length == originalLength)
                 {
-                    // Not a template
+                    // Not a structured template
                     sb.AppendFormat(formatProvider, template, parameters);
                     return;
                 }
 
+                var literal = templateEnumerator.Current.Literal;
                 sb.Append(template, pos, literal.Print);
                 pos += literal.Print;
                 if (literal.Skip == 0)
@@ -77,9 +79,12 @@ namespace NLog.MessageTemplates
                 else
                 {
                     pos += literal.Skip;
-                    var hole = holeEnumerator.Current.Hole;
-                    if (hole.Index != -1)
+                    var hole = templateEnumerator.Current.Hole;
+                    if (hole.Alignment != 0)
+                        holeStartPosition = sb.Length;
+                    if (hole.Index != -1 && messageTemplateParameters == null)
                     {
+                        holeIndex++;
                         RenderHole(sb, hole, formatProvider, parameters[hole.Index], true);
                     }
                     else
@@ -88,10 +93,21 @@ namespace NLog.MessageTemplates
                         if (messageTemplateParameters == null)
                         {
                             messageTemplateParameters = new MessageTemplateParameter[parameters.Length];
+                            if (holeIndex != 0)
+                            {
+                                // rewind and try again
+                                templateEnumerator = new TemplateEnumerator(template);
+                                sb.Length = originalLength;
+                                holeIndex = 0;
+                                pos = 0;
+                                continue;
+                            }
                         }
                         messageTemplateParameters[holeIndex++] = new MessageTemplateParameter(hole.Name, holeParameter, hole.Format, hole.CaptureType);
                         RenderHole(sb, hole, formatProvider, holeParameter);
                     }
+                    if (hole.Alignment != 0)
+                        RenderPadding(sb, hole.Alignment, holeStartPosition);
                 }
             }
 
@@ -116,6 +132,7 @@ namespace NLog.MessageTemplates
         {
             int pos = 0;
             int holeIndex = 0;
+            int holeStartPosition = 0;
             foreach (var literal in template.Literals)
             {
                 sb.Append(template.Value, pos, literal.Print);
@@ -127,15 +144,16 @@ namespace NLog.MessageTemplates
                 else
                 {
                     pos += literal.Skip;
-                    if (template.IsPositional)
-                    {
-                        Hole hole = template.Holes[holeIndex++];
-                        RenderHole(sb, hole, formatProvider, parameters[hole.Index], true);
-                    }
-                    else
-                    {
-                        RenderHole(sb, template.Holes[holeIndex], formatProvider, parameters[holeIndex++]);
-                    }
+
+                    var hole = template.Holes[holeIndex];
+                    if (hole.Alignment != 0)
+                        holeStartPosition = sb.Length;
+
+                    var parameter = template.IsPositional ? parameters[hole.Index] : parameters[holeIndex];
+                    ++holeIndex;
+                    RenderHole(sb, hole, formatProvider, parameter, template.IsPositional);
+                    if (hole.Alignment != 0)
+                        RenderPadding(sb, hole.Alignment, holeStartPosition);
                 }
             }
         }
@@ -153,24 +171,33 @@ namespace NLog.MessageTemplates
                 return;
             }
 
-            switch (captureType)
+            if (captureType == CaptureType.Normal && legacy)
             {
-                case CaptureType.Stringify:
-                    ValueSerializer.Instance.StringifyObject(value, holeFormat, formatProvider, sb);
-                    break;
-                case CaptureType.Serialize:
-                    ValueSerializer.Instance.SerializeObject(value, holeFormat, formatProvider, sb);
-                    break;
-                default:
-                    if (legacy)
-                    {
-                        ValueSerializer.FormatToString(value, holeFormat, formatProvider, sb);
-                    }
-                    else
-                    {
-                        ValueSerializer.Instance.FormatObject(value, holeFormat, formatProvider, sb);
-                    }
-                    break;
+                ValueFormatter.FormatToString(value, holeFormat, formatProvider, sb);
+            }
+            else
+            {
+                ValueFormatter.Instance.FormatValue(value, holeFormat, captureType, formatProvider, sb);
+            }
+        }
+
+        private static void RenderPadding(StringBuilder sb, int holeAlignment, int holeStartPosition)
+        {
+            int holeWidth = sb.Length - holeStartPosition;
+            int holePadding = Math.Abs(holeAlignment) - holeWidth;
+            if (holePadding > 0)
+            {
+                if (holeAlignment < 0 || holeWidth == 0)
+                {
+                    sb.Append(' ', holePadding);
+                }
+                else
+                {
+                    string holeFormatVaue = sb.ToString(holeStartPosition, holeWidth);
+                    sb.Length = holeStartPosition;
+                    sb.Append(' ', holePadding);
+                    sb.Append(holeFormatVaue);
+                }
             }
         }
     }

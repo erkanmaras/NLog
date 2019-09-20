@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -45,7 +45,7 @@ namespace NLog.Internal
     /// The <see cref="MessageProperties" /> are returned as the first items
     /// in the collection, and in positional order.
     /// </summary>
-    internal sealed class PropertiesDictionary : IDictionary<object, object>
+    internal sealed class PropertiesDictionary : IDictionary<object, object>, IEnumerable<MessageTemplateParameter>
     {
         private struct PropertyValue
         {
@@ -127,39 +127,45 @@ namespace NLog.Internal
         public IList<MessageTemplateParameter> MessageProperties
         {
             get => _messageProperties ?? ArrayHelper.Empty<MessageTemplateParameter>();
-            internal set
+            internal set => _messageProperties = SetMessageProperties(value, _messageProperties);
+        }
+
+        private IList<MessageTemplateParameter> SetMessageProperties(IList<MessageTemplateParameter> newMessageProperties, IList<MessageTemplateParameter> oldMessageProperties)
+        {
+            if (_eventProperties == null && VerifyUniqueMessageTemplateParametersFast(newMessageProperties))
             {
-                if (_eventProperties == null && VerifyUniqueMessageTemplateParametersFast(value))
+                return newMessageProperties;
+            }
+            else
+            {
+                if (_eventProperties == null)
                 {
-                    _messageProperties = value;
+                    _eventProperties = new Dictionary<object, PropertyValue>(newMessageProperties.Count);
+                }
+
+                if (oldMessageProperties != null && _eventProperties.Count > 0)
+                {
+                    RemoveOldMessageProperties(oldMessageProperties);
+                }
+
+                if (newMessageProperties != null && (_eventProperties.Count > 0 || !InsertMessagePropertiesIntoEmptyDictionary(newMessageProperties, _eventProperties)))
+                {
+                    return CreateUniqueMessagePropertiesListSlow(newMessageProperties, _eventProperties);
                 }
                 else
                 {
-                    if (_eventProperties == null)
-                    {
-                        _eventProperties = new Dictionary<object, PropertyValue>(value.Count);
-                    }
+                    return newMessageProperties;
+                }
+            }
+        }
 
-                    if (_messageProperties != null && _eventProperties.Count > 0)
-                    {
-                        PropertyValue propertyValue;
-                        for (int i = 0; i < _messageProperties.Count; ++i)
-                        {
-                            if (_eventProperties.TryGetValue(_messageProperties[i].Name, out propertyValue) && propertyValue.IsMessageProperty)
-                            {
-                                _eventProperties.Remove(_messageProperties[i].Name);
-                            }
-                        }
-                    }
-
-                    if (value != null && (_eventProperties.Count != 0 || !InsertMessagePropertiesIntoEmptyDictionary(value, _eventProperties)))
-                    {
-                        _messageProperties = CreateUniqueMessagePropertiesListSlow(value, _eventProperties);
-                    }
-                    else
-                    {
-                        _messageProperties = value;
-                    }
+        private void RemoveOldMessageProperties(IList<MessageTemplateParameter> oldMessageProperties)
+        {
+            for (int i = 0; i < oldMessageProperties.Count; ++i)
+            {
+                if (_eventProperties.TryGetValue(oldMessageProperties[i].Name, out var propertyValue) && propertyValue.IsMessageProperty)
+                {
+                    _eventProperties.Remove(oldMessageProperties[i].Name);
                 }
             }
         }
@@ -169,12 +175,9 @@ namespace NLog.Internal
         {
             get
             {
-                if (!IsEmpty)
+                if (!IsEmpty && EventProperties.TryGetValue(key, out var valueItem))
                 {
-                    if (EventProperties.TryGetValue(key, out var valueItem))
-                    {
-                        return valueItem.Value;
-                    }
+                    return valueItem.Value;
                 }
 
                 throw new KeyNotFoundException();
@@ -327,13 +330,10 @@ namespace NLog.Internal
         /// <inheritDoc/>
         public bool TryGetValue(object key, out object value)
         {
-            if (!IsEmpty)
+            if (!IsEmpty && EventProperties.TryGetValue(key, out var valueItem))
             {
-                if (EventProperties.TryGetValue(key, out var valueItem))
-                {
-                    value = valueItem.Value;
-                    return true;
-                }
+                value = valueItem.Value;
+                return true;
             }
 
             value = null;
@@ -341,27 +341,10 @@ namespace NLog.Internal
         }
 
         /// <summary>
-        /// Attempt to use the message-template-parameters without allocating a dictionary
+        /// Check if the message-template-parameters can be used directly without allocating a dictionary
         /// </summary>
         /// <param name="parameterList">Message-template-parameters</param>
-        /// <returns>List of message-template-parameters if succesful (else null)</returns>
-        private static IList<MessageTemplateParameter> CreateUniqueMessagePropertiesListFast(IList<MessageTemplateParameter> parameterList)
-        {
-            if (parameterList.Count <= 10)
-            {
-                bool uniqueMessageProperties = VerifyUniqueMessageTemplateParametersFast(parameterList);
-                if (uniqueMessageProperties)
-                {
-                    var messageProperties = new MessageTemplateParameter[parameterList.Count];
-                    for (int i = 0; i < parameterList.Count; ++i)
-                        messageProperties[i] = parameterList[i];
-                    return messageProperties;
-                }
-            }
-
-            return null;
-        }
-
+        /// <returns>Are all parameter names unique (true / false)</returns>
         private static bool VerifyUniqueMessageTemplateParametersFast(IList<MessageTemplateParameter> parameterList)
         {
             if (parameterList == null || parameterList.Count == 0)
@@ -370,20 +353,16 @@ namespace NLog.Internal
             if (parameterList.Count > 10)
                 return false;
 
-            bool uniqueMessageProperties = true;
             for (int i = 0; i < parameterList.Count - 1; ++i)
             {
                 for (int j = i + 1; j < parameterList.Count; ++j)
                 {
                     if (parameterList[i].Name == parameterList[j].Name)
-                    {
-                        uniqueMessageProperties = false;
-                        break;
-                    }
+                        return false;
                 }
             }
 
-            return uniqueMessageProperties;
+            return true;
         }
 
         /// <summary>
@@ -425,20 +404,17 @@ namespace NLog.Internal
             List<MessageTemplateParameter> messagePropertiesUnique = null;
             for (int i = 0; i < messageProperties.Count; ++i)
             {
-                if (eventProperties.TryGetValue(messageProperties[i].Name, out var valueItem))
+                if (eventProperties.TryGetValue(messageProperties[i].Name, out var valueItem) && valueItem.IsMessageProperty)
                 {
-                    if (valueItem.IsMessageProperty)
+                    if (messagePropertiesUnique == null)
                     {
-                        if (messagePropertiesUnique == null)
+                        messagePropertiesUnique = new List<MessageTemplateParameter>(messageProperties.Count);
+                        for (int j = 0; j < i; ++j)
                         {
-                            messagePropertiesUnique = new List<MessageTemplateParameter>(messageProperties.Count);
-                            for (int j = 0; j < i; ++j)
-                            {
-                                messagePropertiesUnique.Add(messageProperties[j]);
-                            }
+                            messagePropertiesUnique.Add(messageProperties[j]);
                         }
-                        continue;   // Skip already exists
                     }
+                    continue;   // Skip already exists
                 }
 
                 eventProperties[messageProperties[i].Name] = new PropertyValue(messageProperties[i].Value, true);
@@ -448,7 +424,12 @@ namespace NLog.Internal
             return messagePropertiesUnique ?? messageProperties;
         }
 
-        private class DictionaryEnumeratorBase
+        IEnumerator<MessageTemplateParameter> IEnumerable<MessageTemplateParameter>.GetEnumerator()
+        {
+            return new ParameterEnumerator(this);
+        }
+
+        private abstract class DictionaryEnumeratorBase : IDisposable
         {
             private readonly PropertiesDictionary _dictionary;
             private int? _messagePropertiesEnumerator;
@@ -460,7 +441,7 @@ namespace NLog.Internal
                 _dictionary = dictionary;
             }
 
-            protected KeyValuePair<object, object> CurrentPair
+            protected KeyValuePair<object, object> CurrentProperty
             {
                 get
                 {
@@ -471,6 +452,23 @@ namespace NLog.Internal
                     }
                     if (_eventEnumeratorCreated)
                         return new KeyValuePair<object, object>(_eventEnumerator.Current.Key, _eventEnumerator.Current.Value.Value);
+                    throw new InvalidOperationException();
+                }
+            }
+
+            protected MessageTemplateParameter CurrentParameter
+            {
+                get
+                {
+                    if (_messagePropertiesEnumerator.HasValue)
+                    {
+                        return _dictionary._messageProperties[_messagePropertiesEnumerator.Value];
+                    }
+                    if (_eventEnumeratorCreated)
+                    {
+                        string parameterName = XmlHelper.XmlConvertToString(_eventEnumerator.Current.Key ?? string.Empty) ?? string.Empty;
+                        return new MessageTemplateParameter(parameterName, _eventEnumerator.Current.Value.Value, null, CaptureType.Unknown);
+                    }
                     throw new InvalidOperationException();
                 }
             }
@@ -489,7 +487,7 @@ namespace NLog.Internal
                         _messagePropertiesEnumerator = _dictionary._eventProperties.Count - 1;
                     }
 
-                    if (_dictionary._eventProperties != null && _dictionary._eventProperties.Count > 0)
+                    if (HasEventProperties(_dictionary))
                     {
                         _messagePropertiesEnumerator = null;
                         _eventEnumerator = _dictionary._eventProperties.GetEnumerator();
@@ -503,7 +501,7 @@ namespace NLog.Internal
                 {
                     return MoveNextValidEventProperty();
                 }
-                if (_dictionary._messageProperties != null && _dictionary._messageProperties.Count > 0)
+                if (HasMessageProperties(_dictionary))
                 {
                     // Move forward to a key that is not overriden
                     _messagePropertiesEnumerator = FindNextValidMessagePropertyIndex(0);
@@ -513,7 +511,7 @@ namespace NLog.Internal
                     }
                 }
 
-                if (_dictionary._eventProperties != null && _dictionary._eventProperties.Count > 0)
+                if (HasEventProperties(_dictionary))
                 {
                     _eventEnumerator = _dictionary._eventProperties.GetEnumerator();
                     _eventEnumeratorCreated = true;
@@ -521,6 +519,16 @@ namespace NLog.Internal
                 }
 
                 return false;
+            }
+
+            private static bool HasMessageProperties(PropertiesDictionary propertiesDictionary)
+            {
+                return propertiesDictionary._messageProperties != null && propertiesDictionary._messageProperties.Count > 0;
+            }
+
+            private static bool HasEventProperties(PropertiesDictionary propertiesDictionary)
+            {
+                return propertiesDictionary._eventProperties != null && propertiesDictionary._eventProperties.Count > 0;
             }
 
             private bool MoveNextValidEventProperty()
@@ -562,13 +570,27 @@ namespace NLog.Internal
             }
         }
 
+        private class ParameterEnumerator : DictionaryEnumeratorBase, IEnumerator<MessageTemplateParameter>
+        {
+            /// <inheritDoc/>
+            public MessageTemplateParameter Current => CurrentParameter;
+
+            /// <inheritDoc/>
+            object IEnumerator.Current => CurrentParameter;
+
+            public ParameterEnumerator(PropertiesDictionary dictionary)
+                : base(dictionary)
+            {
+            }
+        }
+
         private class DictionaryEnumerator : DictionaryEnumeratorBase, IEnumerator<KeyValuePair<object, object>>
         {
             /// <inheritDoc/>
-            public KeyValuePair<object, object> Current => CurrentPair;
+            public KeyValuePair<object, object> Current => CurrentProperty;
 
             /// <inheritDoc/>
-            object IEnumerator.Current => CurrentPair;
+            object IEnumerator.Current => CurrentProperty;
 
             public DictionaryEnumerator(PropertiesDictionary dictionary)
                 : base(dictionary)
@@ -661,7 +683,7 @@ namespace NLog.Internal
                 }
 
                 /// <inheritDoc/>
-                public object Current => _keyCollection ? CurrentPair.Key : CurrentPair.Value;
+                public object Current => _keyCollection ? CurrentProperty.Key : CurrentProperty.Value;
             }
         }
     }

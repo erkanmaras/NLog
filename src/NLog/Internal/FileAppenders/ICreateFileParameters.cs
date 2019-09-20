@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -92,8 +92,13 @@ namespace NLog.Internal.FileAppenders
 #endif
 
         /// <summary>
-        /// Should we capture the last write time of a file?
+        /// Should archive mutex be created?
         /// </summary>
-        bool CaptureLastWriteTime { get; }
+        bool IsArchivingEnabled { get; }
+
+        /// <summary>
+        /// Should manual simple detection of file deletion be enabled?
+        /// </summary>
+        bool EnableFileDeleteSimpleMonitor { get; }
     }
 }

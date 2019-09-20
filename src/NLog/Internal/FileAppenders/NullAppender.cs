@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,15 +31,17 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System;
-
 namespace NLog.Internal.FileAppenders
 {
+    using System;
+    using System.Security;
+
     /// <summary>
     /// Appender used to discard data for the FileTarget.
     /// Used mostly for testing entire stack except the actual writing to disk.
     /// Throws away all data.
     /// </summary>
+    [SecuritySafeCritical]
     internal class NullAppender : BaseFileAppender
     {
         public static readonly IFileAppenderFactory TheFactory = new Factory();
@@ -57,11 +59,6 @@ namespace NLog.Internal.FileAppenders
         }
 
         public override DateTime? GetFileCreationTimeUtc()
-        {
-            return DateTime.UtcNow;
-        }
-
-        public override DateTime? GetFileLastWriteTimeUtc()
         {
             return DateTime.UtcNow;
         }

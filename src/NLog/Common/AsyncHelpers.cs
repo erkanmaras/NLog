@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,13 +37,41 @@ namespace NLog.Common
     using System.Collections.Generic;
     using System.Text;
     using System.Threading;
-    using Internal;
+    using NLog.Internal;
 
     /// <summary>
     /// Helpers for asynchronous operations.
     /// </summary>
     public static class AsyncHelpers
     {
+        internal static int GetManagedThreadId()
+        {
+#if NETSTANDARD1_3
+            return System.Environment.CurrentManagedThreadId;
+#else
+            return Thread.CurrentThread.ManagedThreadId;
+#endif
+        }
+
+        internal static void StartAsyncTask(AsyncHelpersTask asyncTask, object state)
+        {
+            var asyncDelegate = asyncTask.AsyncDelegate;
+#if NETSTANDARD1_0
+            System.Threading.Tasks.Task.Factory.StartNew(asyncDelegate, state, CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.None, System.Threading.Tasks.TaskScheduler.Default);
+#else
+            ThreadPool.QueueUserWorkItem(asyncDelegate, state);
+#endif
+        }
+
+        internal static void WaitForDelay(TimeSpan delay)
+        {
+#if NETSTANDARD1_3
+            System.Threading.Tasks.Task.Delay(delay).Wait();
+#else
+            Thread.Sleep(delay);
+#endif
+        }
+
         /// <summary>
         /// Iterates over all items in the given collection and runs the specified action
         /// in sequence (each action executes only after the preceding one has completed without an error).
@@ -56,10 +84,10 @@ namespace NLog.Common
         public static void ForEachItemSequentially<T>(IEnumerable<T> items, AsyncContinuation asyncContinuation, AsynchronousAction<T> action)
         {
             action = ExceptionGuard(action);
-            AsyncContinuation invokeNext = null;
+           
             IEnumerator<T> enumerator = items.GetEnumerator();
 
-            invokeNext = ex =>
+            void InvokeNext(Exception ex)
             {
                 if (ex != null)
                 {
@@ -74,10 +102,10 @@ namespace NLog.Common
                     return;
                 }
 
-                action(enumerator.Current, PreventMultipleCalls(invokeNext));
-            };
+                action(enumerator.Current, PreventMultipleCalls(InvokeNext));
+            }
 
-            invokeNext(null);
+            InvokeNext(null);
         }
 
         /// <summary>
@@ -89,10 +117,9 @@ namespace NLog.Common
         public static void Repeat(int repeatCount, AsyncContinuation asyncContinuation, AsynchronousAction action)
         {
             action = ExceptionGuard(action);
-            AsyncContinuation invokeNext = null;
             int remaining = repeatCount;
 
-            invokeNext = ex =>
+            void InvokeNext(Exception ex)
             {
                 if (ex != null)
                 {
@@ -106,10 +133,10 @@ namespace NLog.Common
                     return;
                 }
 
-                action(PreventMultipleCalls(invokeNext));
-            };
+                action(PreventMultipleCalls(InvokeNext));
+            }
 
-            invokeNext(null);
+            InvokeNext(null);
         }
 
         /// <summary>
@@ -181,7 +208,6 @@ namespace NLog.Common
                 ex =>
                 {
                     InternalLogger.Trace("Continuation invoked: {0}", ex);
-                    int r;
 
                     if (ex != null)
                     {
@@ -191,7 +217,7 @@ namespace NLog.Common
                         }
                     }
 
-                    r = Interlocked.Decrement(ref remaining);
+                    var r = Interlocked.Decrement(ref remaining);
                     InternalLogger.Trace("Parallel task completed. {0} items remaining", r);
                     if (r == 0)
                     {
@@ -202,8 +228,7 @@ namespace NLog.Common
             foreach (T item in items)
             {
                 T itemCopy = item;
-
-                ThreadPool.QueueUserWorkItem(s =>
+                StartAsyncTask(new AsyncHelpersTask(s =>
                 {
                     try
                     {
@@ -217,7 +242,7 @@ namespace NLog.Common
                             throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
                         }
                     }
-                });
+                }), null);
             }
         }
 
@@ -333,7 +358,7 @@ namespace NLog.Common
         /// Disposes the Timer, and waits for it to leave the Timer-callback-method
         /// </summary>
         /// <param name="timer">The Timer object to dispose</param>
-        /// <param name="timeout">Timeout to wait (TimeSpan.Zero means dispose without wating)</param>
+        /// <param name="timeout">Timeout to wait (TimeSpan.Zero means dispose without waiting)</param>
         /// <returns>Timer disposed within timeout (true/false)</returns>
         internal static bool WaitForDispose(this Timer timer, TimeSpan timeout)
         {
@@ -342,12 +367,9 @@ namespace NLog.Common
             if (timeout != TimeSpan.Zero)
             {
                 ManualResetEvent waitHandle = new ManualResetEvent(false);
-                if (timer.Dispose(waitHandle))
+                if (timer.Dispose(waitHandle) && !waitHandle.WaitOne((int)timeout.TotalMilliseconds))
                 {
-                    if (!waitHandle.WaitOne((int)timeout.TotalMilliseconds))
-                    {
-                        return false;   // Return without waiting for timer, and without closing waitHandle (Avoid ObjectDisposedException)
-                    }
+                    return false;   // Return without waiting for timer, and without closing waitHandle (Avoid ObjectDisposedException)
                 }
 
                 waitHandle.Close();

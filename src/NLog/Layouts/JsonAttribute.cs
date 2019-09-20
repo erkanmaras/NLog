@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,13 +33,15 @@
 
 namespace NLog.Layouts
 {
-    using Config;
+    using NLog.Config;
 
     /// <summary>
     /// JSON attribute.
     /// </summary>
     [NLogConfigurationItem]
     [ThreadAgnostic]
+    [ThreadSafe]
+    [AppDomainFixedOutput]
     public class JsonAttribute
     {
         /// <summary>
@@ -65,35 +67,52 @@ namespace NLog.Layouts
             Name = name;
             Layout = layout;
             Encode = encode;
+            IncludeEmptyValue = false;
         }
 
         /// <summary>
         /// Gets or sets the name of the attribute.
         /// </summary>
+        /// <docgen category='JSON Attribute Options' order='10' />
         [RequiredParameter]
         public string Name { get; set; }
 
         /// <summary>
         /// Gets or sets the layout that will be rendered as the attribute's value.
         /// </summary>
+        /// <docgen category='JSON Attribute Options' order='10' />
         [RequiredParameter]
-        public Layout Layout { get => LayoutWrapper.Inner;
+        public Layout Layout
+        {
+            get => LayoutWrapper.Inner;
             set => LayoutWrapper.Inner = value;
         }
 
         /// <summary>
-        /// Determines wether or not this attribute will be Json encoded.
+        /// Determines whether or not this attribute will be Json encoded.
         /// </summary>
-        public bool Encode { get => LayoutWrapper.JsonEncode;
+        /// <docgen category='JSON Attribute Options' order='100' />
+        public bool Encode
+        {
+            get => LayoutWrapper.JsonEncode;
             set => LayoutWrapper.JsonEncode = value;
         }
 
         /// <summary>
         /// Gets or sets a value indicating whether to escape non-ascii characters
         /// </summary>
-        public bool EscapeUnicode { get => LayoutWrapper.EscapeUnicode;
+        /// <docgen category='JSON Attribute Options' order='100' />
+        public bool EscapeUnicode
+        {
+            get => LayoutWrapper.EscapeUnicode;
             set => LayoutWrapper.EscapeUnicode = value;
         }
+
+        /// <summary>
+        /// Gets or sets whether an attribute with empty value should be included in the output
+        /// </summary>
+        /// <docgen category='JSON Attribute Options' order='100' />
+        public bool IncludeEmptyValue { get; set; }
 
         internal readonly LayoutRenderers.Wrappers.JsonEncodeLayoutRendererWrapper LayoutWrapper = new LayoutRenderers.Wrappers.JsonEncodeLayoutRendererWrapper();
     }

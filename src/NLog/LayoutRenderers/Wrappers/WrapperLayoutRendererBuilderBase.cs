@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// 
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System;
 using System.Text;
 
 namespace NLog.LayoutRenderers.Wrappers
@@ -42,17 +43,15 @@ namespace NLog.LayoutRenderers.Wrappers
     /// </summary>
     public abstract class WrapperLayoutRendererBuilderBase : WrapperLayoutRendererBase
     {
-        /// <summary>
-        /// Render to local target using Inner Layout, and then transform before final append
-        /// </summary>
-        /// <param name="builder"></param>
-        /// <param name="logEvent"></param>
-        protected override void Append(StringBuilder builder, LogEventInfo logEvent)
+        /// <inheritdoc/>
+        protected override void RenderInnerAndTransform(LogEventInfo logEvent, StringBuilder builder, int orgLength)
         {
             using (var localTarget = new Internal.AppendBuilderCreator(builder, true))
             {
+#pragma warning disable CS0618 // Type or member is obsolete
                 RenderFormattedMessage(logEvent, localTarget.Builder);
                 TransformFormattedMesssage(logEvent, localTarget.Builder);
+#pragma warning restore CS0618 // Type or member is obsolete
             }
         }
 
@@ -61,6 +60,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// </summary>
         /// <param name="logEvent"></param>
         /// <param name="target">Output to be transform.</param>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
         protected virtual void TransformFormattedMesssage(LogEventInfo logEvent, StringBuilder target)
         {
             TransformFormattedMesssage(target);
@@ -70,6 +70,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// Transforms the output of another layout.
         /// </summary>
         /// <param name="target">Output to be transform.</param>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
         protected abstract void TransformFormattedMesssage(StringBuilder target);
 
         /// <summary>
@@ -77,6 +78,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// </summary>
         /// <param name="logEvent"></param>
         /// <param name="target"><see cref="StringBuilder"/> for the result</param>
+        [Obsolete("Inherit from WrapperLayoutRendererBase and override RenderInnerAndTransform() instead. Marked obsolete in NLog 4.6")]
         protected virtual void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
         {
             Inner.RenderAppendBuilder(logEvent, target);
@@ -89,7 +91,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <returns></returns>
         protected sealed override string Transform(string text)
         {
-            throw new System.NotSupportedException("Use TransformFormattedMesssage");
+            throw new NotSupportedException("Use TransformFormattedMesssage");
         }
 
         /// <summary>
@@ -99,7 +101,7 @@ namespace NLog.LayoutRenderers.Wrappers
         /// <returns></returns>
         protected sealed override string RenderInner(LogEventInfo logEvent)
         {
-            throw new System.NotSupportedException("Use RenderFormattedMessage");
+            throw new NotSupportedException("Use RenderFormattedMessage");
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,18 +31,15 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System;
-using NLog.Common;
-using NLog.Config;
-using NLog.Targets;
-using NLog.Targets.Wrappers;
-using NLog.UnitTests.Common;
-using NLog.UnitTests.Targets.Wrappers;
-
 namespace NLog.UnitTests.LayoutRenderers
 {
+    using System;
     using System.Security.Principal;
     using System.Threading;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Targets.Wrappers;
+    using NLog.UnitTests.Common;
     using Xunit;
 
     public class IdentityTests : NLogTestBase
@@ -54,14 +51,25 @@ namespace NLog.UnitTests.LayoutRenderers
 #endif
         public void WindowsIdentityTest()
         {
+#if NETSTANDARD
+            if (IsTravis())
+            {
+                Console.WriteLine("[SKIP] IdentityTests.WindowsIdentityTest NetStandard on Travis not supporting WindowsIdentity");
+                return; // NetCore on Travis not supporting WindowsIdentity
+            }
+#endif
+
             var userDomainName = Environment.GetEnvironmentVariable("USERDOMAIN") ?? string.Empty;
             var userName = Environment.GetEnvironmentVariable("USERNAME") ?? string.Empty;
             if (!string.IsNullOrEmpty(userDomainName))
                 userName = userDomainName + "\\" + userName;
-            AssertLayoutRendererOutput("${windows-identity}", userName);
+
+            NLog.Layouts.Layout layout = "${windows-identity}";
+            var result = layout.Render(LogEventInfo.CreateNullEvent());
+            if (!string.IsNullOrEmpty(result) || !IsAppVeyor())
+                Assert.Equal(userName, result);
         }
 
-#if !NETSTANDARD1_5
         [Fact]
         public void IdentityTest1()
         {
@@ -97,7 +105,7 @@ namespace NLog.UnitTests.LayoutRenderers
                             .RegisterDefinition("CSharpEventTarget", typeof(CSharpEventTarget));
 
 
-                LogManager.Configuration = CreateConfigurationFromString(@"<?xml version='1.0' encoding='utf-8' ?>
+                LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"<?xml version='1.0' encoding='utf-8' ?>
 <nlog xmlns='http://www.nlog-project.org/schemas/NLog.xsd'
       xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
  
@@ -197,7 +205,7 @@ namespace NLog.UnitTests.LayoutRenderers
             {
             }
 
-        #region Overrides of GenericIdentity
+#region Overrides of GenericIdentity
 
             /// <summary>
             /// Gets a value indicating whether the user has been authenticated.
@@ -207,8 +215,7 @@ namespace NLog.UnitTests.LayoutRenderers
             /// </returns>
             public override bool IsAuthenticated => false;
 
-            #endregion
+#endregion
         }
-#endif
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,15 +37,14 @@ namespace NLog.LayoutRenderers
 {
     using System;
     using System.Collections.Generic;
+    using System.ComponentModel;
     using System.Globalization;
     using System.Text;
     using Microsoft.Win32;
-    using NLog;
-    using Common;
-    using Internal;
-    using Config;
-    using System.ComponentModel;
-    using Layouts;
+    using NLog.Common;
+    using NLog.Internal;
+    using NLog.Config;
+    using NLog.Layouts;
 
     /// <summary>
     /// A value from the Registry.
@@ -74,7 +73,7 @@ namespace NLog.LayoutRenderers
         public Layout DefaultValue { get; set; }
 
         /// <summary>
-        /// Require escaping backward slashes in <see cref="DefaultValue"/>. Need to be backwardscompatible.
+        /// Require escaping backward slashes in <see cref="DefaultValue"/>. Need to be backwards-compatible.
         /// 
         /// When true:
         /// 
@@ -82,6 +81,7 @@ namespace NLog.LayoutRenderers
         /// `\\` in value should be configured as `\\\\`.
         /// </summary>
         /// <remarks>Default value wasn't a Layout before and needed an escape of the slash</remarks>
+        /// <docgen category='Registry Options' order='50' />
         [DefaultValue(true)]
         public bool RequireEscapingSlashesInDefaultValue { get; set; }
 
@@ -90,6 +90,7 @@ namespace NLog.LayoutRenderers
         /// Gets or sets the registry view (see: https://msdn.microsoft.com/de-de/library/microsoft.win32.registryview.aspx). 
         /// Allowed values: Registry32, Registry64, Default 
         /// </summary>
+        /// <docgen category='Registry Options' order='10' />
         [DefaultValue("Default")]
         public RegistryView View { get; set; }
 #endif
@@ -125,9 +126,9 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event. Ignored.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            Object registryValue = null;
+            object registryValue = null;
             // Value = null is necessary for querying "unnamed values"
-            string renderedValue = Value != null ? Value.Render(logEvent) : null;
+            string renderedValue = Value?.Render(logEvent);
 
             var parseResult = ParseKey(Key.Render(logEvent));
             try
@@ -270,7 +271,7 @@ namespace NLog.LayoutRenderers
                 case RegistryHive.CurrentUser:
                     return Registry.CurrentUser;
                 default:
-                    throw new ArgumentException("Only RegistryHive.LocalMachine and RegistryHive.CurrentUser are supported.", "hive");
+                    throw new ArgumentException("Only RegistryHive.LocalMachine and RegistryHive.CurrentUser are supported.", nameof(hive));
             }
         }
 #endif

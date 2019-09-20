@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -48,11 +48,13 @@ namespace NLog.UnitTests.Fluent
     {
         private static readonly ILogger _logger = LogManager.GetLogger("logger1");
 
+        private LogEventInfo _lastLogEventInfo;
+
         public LogBuilderTests()
         {
             var configuration = new LoggingConfiguration();
 
-            var t1 = new LastLogEventListTarget { Name = "t1" };
+            var t1 = new MethodCallTarget("t1", (l, parms) => _lastLogEventInfo = l);
             var t2 = new DebugTarget { Name = "t2", Layout = "${message}" };
             configuration.AddTarget(t1);
             configuration.AddTarget(t2);
@@ -493,6 +495,15 @@ namespace NLog.UnitTests.Fluent
             AssertDebugLastMessage("t2", "Message with 4,1 4,001 31-12-2016 00:00:00 True");
         }
 
+        [Fact]
+        public void LogBuilder_Structured_Logging_Test()
+        {
+            var logEvent = _logger.Info().Property("Property1Key", "Property1Value").Message("{@message}", "My custom message").LogEventInfo;
+            Assert.NotEmpty(logEvent.Properties);
+            Assert.Contains("message", logEvent.Properties.Keys);
+            Assert.Contains("Property1Key", logEvent.Properties.Keys);
+        }
+
         ///<remarks>
         /// func because 1 logbuilder creates 1 message
         /// 
@@ -555,27 +566,23 @@ namespace NLog.UnitTests.Fluent
         /// Test the written logevent
         /// </summary>
         /// <param name="expected">exptected event to be logged.</param>
-        static void AssertLastLogEventTarget(LogEventInfo expected)
+        void AssertLastLogEventTarget(LogEventInfo expected)
         {
-            var target = LogManager.Configuration.FindTargetByName<LastLogEventListTarget>("t1");
-            Assert.NotNull(target);
+            Assert.NotNull(_lastLogEventInfo);
+            Assert.Equal(expected.Message, _lastLogEventInfo.Message);
 
-            var lastLogEvent = target.LastLogEvent;
-            Assert.NotNull(lastLogEvent);
-            Assert.Equal(expected.Message, lastLogEvent.Message);
+            Assert.NotNull(_lastLogEventInfo.Properties);
 
-            Assert.NotNull(lastLogEvent.Properties);
-            //remove caller as they are also removed from the alleventrenders.
-            lastLogEvent.Properties.Remove("CallerMemberName");
-            lastLogEvent.Properties.Remove("CallerLineNumber");
-            lastLogEvent.Properties.Remove("CallerFilePath");
+            // TODO NLog ver. 5 - Remove these properties
+            _lastLogEventInfo.Properties.Remove("CallerMemberName");
+            _lastLogEventInfo.Properties.Remove("CallerLineNumber");
+            _lastLogEventInfo.Properties.Remove("CallerFilePath");
 
-
-            Assert.Equal(expected.Properties, lastLogEvent.Properties);
-            Assert.Equal(expected.LoggerName, lastLogEvent.LoggerName);
-            Assert.Equal(expected.Level, lastLogEvent.Level);
-            Assert.Equal(expected.Exception, lastLogEvent.Exception);
-            Assert.Equal(expected.FormatProvider, lastLogEvent.FormatProvider);
+            Assert.Equal(expected.Properties, _lastLogEventInfo.Properties);
+            Assert.Equal(expected.LoggerName, _lastLogEventInfo.LoggerName);
+            Assert.Equal(expected.Level, _lastLogEventInfo.Level);
+            Assert.Equal(expected.Exception, _lastLogEventInfo.Exception);
+            Assert.Equal(expected.FormatProvider, _lastLogEventInfo.FormatProvider);
         }
     }
 }

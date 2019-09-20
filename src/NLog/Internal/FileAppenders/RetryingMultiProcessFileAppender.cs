@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -63,14 +63,10 @@ namespace NLog.Internal.FileAppenders
         /// <param name="count">The number of bytes.</param>
         public override void Write(byte[] bytes, int offset, int count)
         {
-            using (FileStream fileStream = CreateFileStream(false))
+            int overrideBufferSize = Math.Min((count / 4096 + 1) * 4096, CreateFileParameters.BufferSize);
+            using (FileStream fileStream = CreateFileStream(false, overrideBufferSize))
             {
                 fileStream.Write(bytes, offset, count);
-            }
-
-            if (CaptureLastWriteTime)
-            {
-                FileTouched();
             }
         }
 
@@ -106,22 +102,7 @@ namespace NLog.Internal.FileAppenders
         }
 
         /// <summary>
-        /// Gets the last time the file associated with the appeander is written. The time returned is in Coordinated 
-        /// Universal Time [UTC] standard.
-        /// </summary>
-        /// <returns>The time the file was last written to.</returns>
-        public override DateTime? GetFileLastWriteTimeUtc()
-        {
-            FileInfo fileInfo = new FileInfo(FileName);
-            if (fileInfo.Exists)
-            {
-                return fileInfo.GetLastWriteTimeUtc();
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Gets the length in bytes of the file associated with the appeander.
+        /// Gets the length in bytes of the file associated with the appender.
         /// </summary>
         /// <returns>A long value representing the length of the file in bytes.</returns>
         public override long? GetFileLength()

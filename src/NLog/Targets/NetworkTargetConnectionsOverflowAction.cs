@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -45,7 +45,7 @@ namespace NLog.Targets
         /// <summary>
         /// Just allow it.
         /// </summary>
-        AllowNewConnnection,
+        AllowNewConnnection, //TODO Nlog 5 - fix typo and obsolete this one
 
         /// <summary>
         /// Discard the connection item.

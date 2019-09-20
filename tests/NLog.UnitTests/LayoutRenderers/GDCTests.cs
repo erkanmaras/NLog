@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Config;
+
 namespace NLog.UnitTests.LayoutRenderers
 {
     using Xunit;
@@ -40,7 +42,7 @@ namespace NLog.UnitTests.LayoutRenderers
         [Fact]
         public void GDCTest()
         {
-            LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
             <nlog>
                 <targets><target name='debug' type='Debug' layout='${gdc:item=myitem} ${message}' /></targets>
                 <rules>
@@ -59,6 +61,23 @@ namespace NLog.UnitTests.LayoutRenderers
             GlobalDiagnosticsContext.Remove("myitem");
             LogManager.GetLogger("A").Debug("c");
             AssertDebugLastMessage("debug", " c");
+        }
+
+        [Fact]
+        public void GDCFormatTest()
+        {
+            LogManager.Configuration = XmlLoggingConfiguration.CreateFromXmlString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${gdc:item=appid:format=@} ${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            GlobalDiagnosticsContext.Clear();
+            GlobalDiagnosticsContext.Set("appid", new { AppId = 123 });
+            LogManager.GetLogger("A").Debug("a");
+            AssertDebugLastMessage("debug", "{\"AppId\":123} a");
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !__IOS__&& !__ANDROID__ && !NETSTANDARD1_5
+#if !SILVERLIGHT && !__IOS__&& !__ANDROID__ && !NETSTANDARD1_0
 
 namespace NLog
 {
@@ -39,16 +39,15 @@ namespace NLog
     using System.Collections;
     using System.ComponentModel;
     using System.Diagnostics;
-    using System.Reflection;
     using System.Text;
     using System.Xml;
+    using NLog.Internal;
 
     /// <summary>
     /// TraceListener which routes all messages through NLog.
     /// </summary>
     public class NLogTraceListener : TraceListener
     {
-        private static readonly Assembly systemAssembly = typeof(Trace).Assembly;
         private LogFactory _logFactory;
         private LogLevel _defaultLogLevel = LogLevel.Debug;
         private bool _attributesLoaded;
@@ -76,8 +75,8 @@ namespace NLog
 
             set
             {
-                _attributesLoaded = true;
                 _logFactory = value;
+                _attributesLoaded = true;                
             }
         }
 
@@ -94,8 +93,8 @@ namespace NLog
 
             set
             {
-                _attributesLoaded = true;
                 _defaultLogLevel = value;
+                _attributesLoaded = true;
             }
         }
 
@@ -112,8 +111,8 @@ namespace NLog
 
             set
             {
-                _attributesLoaded = true;
                 _forceLogLevel = value;
+                _attributesLoaded = true;
             }
         }
 
@@ -130,8 +129,8 @@ namespace NLog
 
             set
             {
-                _attributesLoaded = true;
                 _disableFlush = value;
+                _attributesLoaded = true;
             }
         }
 
@@ -155,8 +154,8 @@ namespace NLog
 
             set
             {
-                _attributesLoaded = true;
                 _autoLoggerName = value;
+                _attributesLoaded = true;
             }
         }
 
@@ -202,7 +201,7 @@ namespace NLog
         /// <param name="detailMessage">A detailed message to emit.</param>
         public override void Fail(string message, string detailMessage)
         {
-            ProcessLogEventInfo(LogLevel.Error, null, message + " " + detailMessage, null, null, TraceEventType.Error, null);
+            ProcessLogEventInfo(LogLevel.Error, null, string.Concat(message, " ", detailMessage), null, null, TraceEventType.Error, null);
         }
 
         /// <summary>
@@ -233,9 +232,6 @@ namespace NLog
         /// <param name="data">The trace data to emit.</param>
         public override void TraceData(TraceEventCache eventCache, string source, TraceEventType eventType, int id, object data)
         {
-            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, string.Empty, null, data, null))
-                return;
-
             TraceData(eventCache, source, eventType, id, new object[] { data });
         }
 
@@ -252,20 +248,32 @@ namespace NLog
             if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, string.Empty, null, null, data))
                 return;
 
-            var sb = new StringBuilder();
-            for (int i = 0; i < data.Length; ++i)
+            string message = string.Empty;
+            if (data?.Length > 0)
             {
-                if (i > 0)
+                if (data.Length == 1)
                 {
-                    sb.Append(", ");
+                    message = "{0}";
                 }
+                else
+                {
+                    var sb = new StringBuilder(data.Length * 5 - 2);
+                    for (int i = 0; i < data.Length; ++i)
+                    {
+                        if (i > 0)
+                        {
+                            sb.Append(", ");
+                        }
 
-                sb.Append("{");
-                sb.Append(i);
-                sb.Append("}");
+                        sb.Append('{');
+                        sb.AppendInvariant(i);
+                        sb.Append('}');
+                    }
+                    message = sb.ToString();
+                }
             }
 
-            ProcessLogEventInfo(TranslateLogLevel(eventType), source, sb.ToString(), data, id, eventType, null);
+            ProcessLogEventInfo(TranslateLogLevel(eventType), source, message, data, id, eventType, null);
         }
 
         /// <summary>
@@ -384,55 +392,8 @@ namespace NLog
         /// </summary>
         protected virtual void ProcessLogEventInfo(LogLevel logLevel, string loggerName, [Localizable(false)] string message, object[] arguments, int? eventId, TraceEventType? eventType, Guid? relatedActiviyId)
         {
-            loggerName = (loggerName ?? Name) ?? string.Empty;
-
-            StackTrace stackTrace = null;
-            int userFrameIndex = -1;
-            if (AutoLoggerName)
-            {
-                stackTrace = new StackTrace();
-                MethodBase userMethod = null;
-
-                for (int i = 0; i < stackTrace.FrameCount; ++i)
-                {
-                    var frame = stackTrace.GetFrame(i);
-                    var method = frame.GetMethod();
-
-                    if (method.DeclaringType == GetType())
-                    {
-                        // skip all methods of this type
-                        continue;
-                    }
-
-                    if (method.DeclaringType != null && method.DeclaringType.Assembly == systemAssembly)
-                    {
-                        // skip all methods from System.dll
-                        continue;
-                    }
-
-                    userFrameIndex = i;
-                    userMethod = method;
-                    break;
-                }
-
-                if (userFrameIndex >= 0)
-                {
-                    if (userMethod != null && userMethod.DeclaringType != null)
-                    {
-                        loggerName = userMethod.DeclaringType.FullName;
-                    }
-                }
-            }
-
-            ILogger logger;
-            if (LogFactory != null)
-            {
-                logger = LogFactory.GetLogger(loggerName);
-            }
-            else
-            {
-                logger = LogManager.GetLogger(loggerName);
-            }
+            StackTrace stackTrace = AutoLoggerName ? new StackTrace() : null;
+            ILogger logger = GetLogger(loggerName, stackTrace, out int userFrameIndex);
 
             logLevel = _forceLogLevel ?? logLevel;
             if (!logger.IsEnabled(logLevel))
@@ -441,7 +402,7 @@ namespace NLog
             }
 
             var ev = new LogEventInfo();
-            ev.LoggerName = loggerName;
+            ev.LoggerName = logger.Name;
             ev.Level = logLevel;
             if (eventType.HasValue)
             {
@@ -470,11 +431,48 @@ namespace NLog
             logger.Log(ev);
         }
 
+        private ILogger GetLogger(string loggerName, StackTrace stackTrace, out int userFrameIndex)
+        {
+            loggerName = (loggerName ?? Name) ?? string.Empty;
+
+            userFrameIndex = -1;
+            if (stackTrace != null)
+            {
+                for (int i = 0; i < stackTrace.FrameCount; ++i)
+                {
+                    var frame = stackTrace.GetFrame(i);
+                    loggerName = StackTraceUsageUtils.LookupClassNameFromStackFrame(frame);
+                    if (!string.IsNullOrEmpty(loggerName))
+                    {
+                        userFrameIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (LogFactory != null)
+            {
+                return LogFactory.GetLogger(loggerName);
+            }
+            else
+            {
+                return LogManager.GetLogger(loggerName);
+            }
+        }
+
         private void InitAttributes()
         {
             if (!_attributesLoaded)
             {
                 _attributesLoaded = true;
+
+                if (Trace.AutoFlush)
+                {
+                    // Avoid a world of hurt, by not constantly spawning new flush threads
+                    // Also timeout exceptions thrown by Flush() will not break diagnostic Trace-logic
+                    _disableFlush = true;
+                }
+
                 foreach (DictionaryEntry de in Attributes)
                 {
                     var key = (string)de.Key;
@@ -495,7 +493,7 @@ namespace NLog
                             break;
 
                         case "DISABLEFLUSH":
-                            _disableFlush = Boolean.Parse(value);
+                            _disableFlush = bool.Parse(value);
                             break;
                     }
                 }

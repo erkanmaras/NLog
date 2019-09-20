@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -72,8 +72,8 @@ namespace NLog.Targets
         /// </summary>
         public DateAndSequenceArchive(string fileName, DateTime date, string dateFormat, int sequence)
         {
-            if (fileName == null) throw new ArgumentNullException("fileName");
-            if (dateFormat == null) throw new ArgumentNullException("dateFormat");
+            if (fileName == null) throw new ArgumentNullException(nameof(fileName));
+            if (dateFormat == null) throw new ArgumentNullException(nameof(dateFormat));
 
             Date = date;
             _dateFormat = dateFormat;

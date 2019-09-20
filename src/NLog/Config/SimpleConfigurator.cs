@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2017 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
+// Copyright (c) 2004-2019 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -33,7 +33,8 @@
 
 namespace NLog.Config
 {
-    using Targets;
+    using System;
+    using NLog.Targets;
 
     /// <summary>
     /// Provides simple programmatic configuration API used for trivial logging cases.
@@ -42,9 +43,10 @@ namespace NLog.Config
     /// </summary>
     public static class SimpleConfigurator
     {
+#if !NETSTANDARD1_3
         /// <summary>
         /// Configures NLog for console logging so that all messages above and including
-        /// the <see cref="LogLevel.Info"/> level are output to the console.
+        /// the <see cref="NLog.LogLevel.Info"/> level are output to the console.
         /// </summary>
         public static void ConfigureForConsoleLogging()
         {
@@ -62,18 +64,19 @@ namespace NLog.Config
             ConsoleTarget consoleTarget = new ConsoleTarget();
 
             LoggingConfiguration config = new LoggingConfiguration();
-            LoggingRule rule = new LoggingRule("*", minLevel, consoleTarget);
-            config.LoggingRules.Add(rule);
+            config.AddRule(minLevel, LogLevel.MaxLevel, consoleTarget, "*");
             LogManager.Configuration = config;
         }
+#endif
 
         /// <summary>
         /// Configures NLog for to log to the specified target so that all messages 
-        /// above and including the <see cref="LogLevel.Info"/> level are output.
+        /// above and including the <see cref="NLog.LogLevel.Info"/> level are output.
         /// </summary>
         /// <param name="target">The target to log all messages to.</param>
         public static void ConfigureForTargetLogging(Target target)
         {
+            if (target == null) { throw new ArgumentNullException(nameof(target)); }
             ConfigureForTargetLogging(target, LogLevel.Info);
         }
 
@@ -85,15 +88,15 @@ namespace NLog.Config
         /// <param name="minLevel">The minimal logging level.</param>
         public static void ConfigureForTargetLogging(Target target, LogLevel minLevel)
         {
+            if (target == null) { throw new ArgumentNullException(nameof(target)); }
             LoggingConfiguration config = new LoggingConfiguration();
-            LoggingRule rule = new LoggingRule("*", minLevel, target);
-            config.LoggingRules.Add(rule);
+            config.AddRule(minLevel, LogLevel.MaxLevel, target, "*");
             LogManager.Configuration = config;
         }
 
         /// <summary>
         /// Configures NLog for file logging so that all messages above and including
-        /// the <see cref="LogLevel.Info"/> level are written to the specified file.
+        /// the <see cref="NLog.LogLevel.Info"/> level are written to the specified file.
         /// </summary>
         /// <param name="fileName">Log file name.</param>
         public static void ConfigureForFileLogging(string fileName)
